@@ -13,6 +13,10 @@ LOGGER = get_logger(__name__)
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv
+    if "--uci-engine" in argv:
+        from .engine.builtin_engine import main as uci_main
+
+        return uci_main()
     configure_logging(logging.INFO)
     LOGGER.info("Starting Chess AI Overlay")
 

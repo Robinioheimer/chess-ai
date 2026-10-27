@@ -60,12 +60,23 @@ def _background_color(cell: np.ndarray) -> np.ndarray:
 
 
 def _largest_component(mask: np.ndarray) -> tuple[np.ndarray, float]:
-    """Return the largest connected component and its area fraction."""
+    """Return the largest central connected component and its area fraction.
+
+    Requiring overlap with the central [0.22..0.78] region of the square
+    rejects rank/file coordinate labels ('1'-'8', 'a'-'h') printed in square
+    corners on Chess.com and Lichess.
+    """
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
     if count <= 1:
         return mask, 0.0
-    largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    area = float(stats[largest, cv2.CC_STAT_AREA])
+    h, w = mask.shape[:2]
+    cy0, cy1 = int(h * 0.22), max(int(h * 0.22) + 1, int(h * 0.78))
+    cx0, cx1 = int(w * 0.22), max(int(w * 0.22) + 1, int(w * 0.78))
+    central_labels = set(np.unique(labels[cy0:cy1, cx0:cx1])) - {0}
+    if not central_labels:
+        return np.zeros_like(mask), 0.0
+    largest = max(central_labels, key=lambda lbl: int(stats[int(lbl), cv2.CC_STAT_AREA]))
+    area = float(stats[int(largest), cv2.CC_STAT_AREA])
     component = (labels == largest).astype(np.uint8) * 255
     return component, area / float(mask.size)
 

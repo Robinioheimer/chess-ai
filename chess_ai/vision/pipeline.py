@@ -19,6 +19,7 @@ from ..core.fen_utils import (
     board_grid_to_screen_grid,
     board_to_grid,
     build_fen,
+    grid_to_board,
     screen_grid_to_board_grid,
 )
 from ..logging_setup import get_logger
@@ -159,12 +160,8 @@ class RecognitionPipeline:
         if detection is None:
             return None, padded, padding
         if padding:
-            # Keep an in-padding copy for warping (no negative source
-            # coordinates) and expose original-frame coordinates to the overlay.
             detection.corners = detection.corners - np.array(
                 [padding, padding], dtype=np.float32)
-            # Clip to the original frame so a contour that slightly bites into
-            # the padding ring cannot overshoot the board during warping.
             height, width = frame.shape[:2]
             detection.corners[:, 0] = np.clip(detection.corners[:, 0], 0, width - 1)
             detection.corners[:, 1] = np.clip(detection.corners[:, 1], 0, height - 1)
@@ -314,7 +311,6 @@ class RecognitionPipeline:
             self._candidate_grid = result.screen_grid
             self._candidate_count = 1
         if self._candidate_count < self.stable_readings and self._last_grid is not None:
-            # Wait for confirmation; report the previously accepted position.
             result.error = None
             LOGGER.debug("Awaiting stable reading %d/%d",
                          self._candidate_count, self.stable_readings)
@@ -382,6 +378,203 @@ class RecognitionPipeline:
         start_board_grid = board_to_grid(chess.Board())
         return board_grid_to_screen_grid(start_board_grid, perspective_white)
 
+    def _try_auto_calibrate_opening(
+        self,
+        grid: Grid,
+        cells: np.ndarray,
+        threshold: float,
+    ) -> Optional[tuple[Grid, list[list[float]]]]:
+        """Auto-calibrate templates when an early opening position is detected.
+
+        If 1-4 moves have been played (all 32 pieces still on the board, >=13
+        top home squares occupied by one colour, >=13 bottom home squares by
+        the opposite colour, and every piece missing from the home ranks sits
+        in rows 2..5), then all remaining home-rank squares still hold their
+        original starting pieces. Learning templates from those unmoved home
+        squares lets the recognizer classify the moved pieces in rows 2..5
+        using the board's actual piece theme.
+        """
+        if self.recognizer.calibrated:
+            return None
+        top_white = sum(1 for r in (0, 1) for c in range(8) if grid[r][c] and grid[r][c].isupper())
+        top_black = sum(1 for r in (0, 1) for c in range(8) if grid[r][c] and grid[r][c].islower())
+        bot_white = sum(1 for r in (6, 7) for c in range(8) if grid[r][c] and grid[r][c].isupper())
+        bot_black = sum(1 for r in (6, 7) for c in range(8) if grid[r][c] and grid[r][c].islower())
+
+        if top_black >= 13 and bot_white >= 13 and top_white == 0 and bot_black == 0:
+            persp_white = True
+            top_home, bot_home = top_black, bot_white
+            mid_top = sum(1 for r in (2, 3, 4, 5) for c in range(8) if grid[r][c] and grid[r][c].islower())
+            mid_bot = sum(1 for r in (2, 3, 4, 5) for c in range(8) if grid[r][c] and grid[r][c].isupper())
+        elif top_white >= 13 and bot_black >= 13 and top_black == 0 and bot_white == 0:
+            persp_white = False
+            top_home, bot_home = top_white, bot_black
+            mid_top = sum(1 for r in (2, 3, 4, 5) for c in range(8) if grid[r][c] and grid[r][c].isupper())
+            mid_bot = sum(1 for r in (2, 3, 4, 5) for c in range(8) if grid[r][c] and grid[r][c].islower())
+        else:
+            return None
+
+        # Conservation check: every piece that left the home ranks is in rows 2..5.
+        if top_home + mid_top != 16 or bot_home + mid_bot != 16:
+            return None
+        if self.manual_perspective is not None and self.manual_perspective != persp_white:
+            return None
+
+        expected = self._starting_screen_grid(persp_white)
+        home_symbols: Grid = [[None] * 8 for _ in range(8)]
+        for r in (0, 1, 6, 7):
+            for c in range(8):
+                if grid[r][c] is not None:
+                    home_symbols[r][c] = expected[r][c]
+
+        try:
+            self.recognizer.calibrate_from_cells(cells, home_symbols, replace=True)
+        except Exception:
+            return None
+
+        new_grid: Grid = [[None] * 8 for _ in range(8)]
+        new_conf = [[0.95] * 8 for _ in range(8)]
+        for r in (0, 1, 6, 7):
+            for c in range(8):
+                new_grid[r][c] = home_symbols[r][c]
+        for r in (2, 3, 4, 5):
+            for c in range(8):
+                if grid[r][c] is None:
+                    continue
+                piece, conf, _ = self.recognizer.recognize_cell(
+                    cells[r, c], color_threshold=threshold
+                )
+                if piece is not None:
+                    new_grid[r][c] = piece.symbol()
+                    new_conf[r][c] = conf
+                else:
+                    new_grid[r][c] = grid[r][c]
+                    new_conf[r][c] = 0.7
+        return new_grid, new_conf
+
+    def _apply_move_continuity(
+        self,
+        grid: Grid,
+        confidences: list[list[float]],
+        features_grid: list[list[CellFeatures]],
+    ) -> None:
+        """Use the previous accepted board state to preserve piece identities across moves.
+
+        Occupancy (empty vs occupied) and piece colour (White vs Black) are
+        much more reliable than single-frame shape classification. When 0
+        squares changed occupancy/colour, no move occurred. When 1 legal move
+        (normal move, capture, castling or en-passant) or a 2-ply exchange on
+        ``self._last_grid`` produces the exact new 64-square occupancy/colour
+        map, we propagate the moving piece's true identity directly.
+        """
+        if self._last_grid is None:
+            return
+
+        def occ_map(g: Grid) -> list[list[Optional[str]]]:
+            return [
+                [None if cell is None else ("W" if cell.isupper() else "B") for cell in row]
+                for row in g
+            ]
+
+        prev_occ = occ_map(self._last_grid)
+        curr_occ = occ_map(grid)
+
+        diffs = [
+            (r, c)
+            for r in range(8)
+            for c in range(8)
+            if prev_occ[r][c] != curr_occ[r][c]
+        ]
+
+        # 0 squares changed occupancy/colour -> identical position on screen.
+        if not diffs:
+            for r in range(8):
+                for c in range(8):
+                    grid[r][c] = self._last_grid[r][c]
+            return
+
+        if len(diffs) > 4:
+            return
+
+        persp_white = (
+            self.manual_perspective
+            if self.manual_perspective is not None
+            else infer_perspective(screen_grid_to_board_grid(self._last_grid, True))
+        )
+        prev_board_grid = screen_grid_to_board_grid(self._last_grid, persp_white)
+        prev_board = grid_to_board(prev_board_grid)
+
+        def board_matches_curr_occ(b: chess.Board) -> bool:
+            sg = board_grid_to_screen_grid(board_to_grid(b), persp_white)
+            return occ_map(sg) == curr_occ
+
+        # Enable castling rights on home squares so python-chess generates castling moves.
+        castling_fen = ""
+        if prev_board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
+            if prev_board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE):
+                castling_fen += "K"
+            if prev_board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE):
+                castling_fen += "Q"
+        if prev_board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
+            if prev_board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK):
+                castling_fen += "k"
+            if prev_board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK):
+                castling_fen += "q"
+
+        # 1. Try 1-ply legal moves for both White and Black.
+        for turn in (chess.WHITE, chess.BLACK):
+            b = prev_board.copy()
+            b.turn = turn
+            if castling_fen:
+                try:
+                    b.set_castling_fen(castling_fen)
+                except ValueError:
+                    pass
+            for move in b.legal_moves:
+                if move.promotion and move.promotion != chess.QUEEN:
+                    continue
+                b.push(move)
+                if board_matches_curr_occ(b):
+                    matched_sg = board_grid_to_screen_grid(board_to_grid(b), persp_white)
+                    # If a pawn promoted, allow the classifier's non-pawn choice on the target square.
+                    for r in range(8):
+                        for c in range(8):
+                            if move.promotion and (r, c) in diffs and curr_occ[r][c] is not None:
+                                sym = grid[r][c]
+                                if sym and sym.lower() in ("q", "r", "b", "n"):
+                                    matched_sg[r][c] = sym
+                            grid[r][c] = matched_sg[r][c]
+                            confidences[r][c] = max(confidences[r][c], 0.92)
+                    return
+                b.pop()
+
+        # 2. Try 2-ply legal move pairs (player move + opponent reply).
+        for turn in (chess.WHITE, chess.BLACK):
+            b = prev_board.copy()
+            b.turn = turn
+            if castling_fen:
+                try:
+                    b.set_castling_fen(castling_fen)
+                except ValueError:
+                    pass
+            for m1 in b.legal_moves:
+                if m1.promotion and m1.promotion != chess.QUEEN:
+                    continue
+                b.push(m1)
+                for m2 in b.legal_moves:
+                    if m2.promotion and m2.promotion != chess.QUEEN:
+                        continue
+                    b.push(m2)
+                    if board_matches_curr_occ(b):
+                        matched_sg = board_grid_to_screen_grid(board_to_grid(b), persp_white)
+                        for r in range(8):
+                            for c in range(8):
+                                grid[r][c] = matched_sg[r][c]
+                                confidences[r][c] = max(confidences[r][c], 0.90)
+                        return
+                    b.pop()
+                b.pop()
+
     def _enforce_chess_constraints(
         self,
         grid: Grid,
@@ -390,7 +583,7 @@ class RecognitionPipeline:
     ) -> None:
         """Guarantee a legal chess placement (no back-rank pawns, 1 king/side)."""
         # 1. Exact starting-position layout (16 top, 32 empty middle, 16 bottom).
-        if self._is_starting_occupancy(grid) and not self.recognizer.calibrated:
+        if self._is_starting_occupancy(grid):
             top_white = sum(
                 1 for r in (0, 1) for c in range(8)
                 if grid[r][c] is not None and grid[r][c].isupper()
@@ -400,6 +593,13 @@ class RecognitionPipeline:
             for r in range(8):
                 for c in range(8):
                     grid[r][c] = expected[r][c]
+            if not self.recognizer.calibrated and self._last_cells is not None:
+                try:
+                    self.recognizer.calibrate_from_cells(
+                        self._last_cells, expected, replace=True
+                    )
+                except Exception:
+                    pass
             return
 
         # 2. Pawns cannot exist on rank 1 or rank 8 (screen rows 0 and 7).
@@ -408,7 +608,7 @@ class RecognitionPipeline:
                 sym = grid[row][col]
                 if sym in ("P", "p"):
                     new_type = classify_non_pawn(features_grid[row][col])
-                    new_sym = chess. PIECE_SYMBOLS[new_type]
+                    new_sym = chess.PIECE_SYMBOLS[new_type]
                     grid[row][col] = new_sym.upper() if sym.isupper() else new_sym
 
         # 3. Ensure exactly one king per colour whenever that colour has pieces on the board.
@@ -442,6 +642,32 @@ class RecognitionPipeline:
                 grid[best_r][best_c] = king_sym
                 confidences[best_r][best_c] = min(confidences[best_r][best_c], 0.58)
 
+        # 4. Ensure the board does not have both kings simultaneously in check
+        #    (which is illegal in chess and rejected by Stockfish).
+        persp_white = (
+            self.manual_perspective
+            if self.manual_perspective is not None
+            else infer_perspective(screen_grid_to_board_grid(grid, True))
+        )
+        board = grid_to_board(screen_grid_to_board_grid(grid, persp_white))
+        w_king = board.king(chess.WHITE)
+        b_king = board.king(chess.BLACK)
+        if w_king is not None and b_king is not None:
+            w_attackers = list(board.attackers(chess.BLACK, w_king))
+            b_attackers = list(board.attackers(chess.WHITE, b_king))
+            if w_attackers and b_attackers:
+                # Reclassify the lowest-confidence non-king attacker so the position is legal.
+                for sq in w_attackers + b_attackers:
+                    file_idx = chess.square_file(sq)
+                    rank_idx = chess.square_rank(sq)
+                    r = (7 - rank_idx) if persp_white else rank_idx
+                    c = file_idx if persp_white else (7 - file_idx)
+                    sym = grid[r][c]
+                    if sym and sym.lower() in ("q", "r", "b"):
+                        replacement = "n" if r in (0, 7) else "p"
+                        grid[r][c] = replacement.upper() if sym.isupper() else replacement
+                        break
+
     def _recognize_cells(
         self, cells: np.ndarray
     ) -> tuple[Grid, list[list[float]]]:
@@ -464,6 +690,16 @@ class RecognitionPipeline:
                 if piece is not None:
                     grid[row][col] = piece.symbol()
 
+        # If an early opening layout (1-4 moves played) is visible and the
+        # recognizer is not yet calibrated, learn templates from the unmoved
+        # home squares and re-classify the moved pieces in rows 2..5.
+        opening_cal = self._try_auto_calibrate_opening(grid, cells, threshold)
+        if opening_cal is not None:
+            grid, confidences = opening_cal
+
+        # Apply legal move-transition continuity from the previous accepted state.
+        self._apply_move_continuity(grid, confidences, features_grid)
+
         self._enforce_chess_constraints(grid, confidences, features_grid)
         self._last_raw_grid = [[cell for cell in row] for row in grid]
 
@@ -475,7 +711,6 @@ class RecognitionPipeline:
                     confidences[row][col] = 0.99
                 else:
                     self._square_overrides.pop((row, col), None)
-            # Re-verify king uniqueness after overrides.
             self._enforce_chess_constraints(grid, confidences, features_grid)
 
         return grid, confidences

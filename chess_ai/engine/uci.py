@@ -120,9 +120,13 @@ class UciEngine:
             # Interpreter scripts (e.g. "python fake_engine.py") are validated
             # by checking the script portion exists.
             if self.executable.endswith(".py"):
-                script = self.executable.split()[-1]
+                script = self._command()[-1]
                 if not os.path.isfile(script):
                     raise UciEngineError(f"Engine script not found: {script!r}")
+            elif "--uci-engine" in self.executable:
+                exe_part = self._command()[0]
+                if not shutil.which(exe_part) and not os.path.isfile(exe_part):
+                    raise UciEngineError(f"Engine executable not found: {exe_part!r}")
             elif not shutil.which(self.executable) and not os.path.isfile(self.executable):
                 raise UciEngineError(f"Engine executable not found: {self.executable!r}")
             kwargs = {
@@ -147,9 +151,15 @@ class UciEngine:
             self._handshake()
 
     def _command(self) -> list[str]:
-        # A python fake engine (or any interpreter script) is supported via
-        # executable strings containing arguments.
-        return self.executable.split() if self.executable.endswith(".py") else [self.executable]
+        # A python fake/built-in engine (or any interpreter script) is supported
+        # via executable strings containing arguments.
+        if "--uci-engine" in self.executable:
+            exe_part = self.executable.replace("--uci-engine", "").strip().strip('"')
+            return [exe_part, "--uci-engine"]
+        if self.executable.endswith(".py"):
+            parts = self.executable.split(" ", 1)
+            return [p.strip('"') for p in parts] if len(parts) == 2 else [self.executable]
+        return [self.executable]
 
     def _read_loop(self) -> None:
         assert self._process is not None and self._process.stdout is not None

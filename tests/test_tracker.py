@@ -89,3 +89,15 @@ def test_manual_fen_not_overwritten_by_unchanged_raw_vision_fen():
     assert moved.accepted and moved.changed
     assert tracker.board.board_fen() == next_board.board_fen()
     assert tracker.board.turn == chess.WHITE
+
+
+def test_observe_placement_flips_turn_when_opponent_in_check():
+    tracker = PositionTracker(side_to_move=chess.WHITE)
+    # Position where Black's king on e8 is in check from White's queen on e2:
+    # it must be Black's turn so was_into_check() is False.
+    fen_black_in_check = "4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1"
+    update = tracker.observe_placement_fen(fen_black_in_check)
+    assert update.accepted
+    assert not update.board.was_into_check()
+    assert update.board.turn == chess.BLACK
+
