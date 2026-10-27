@@ -13,12 +13,22 @@ from typing import Optional
 import chess
 
 from ..config import AppConfig, config_dir
+from ..core.fen_utils import (
+    board_grid_to_screen_grid,
+    board_to_grid,
+    screen_grid_to_board_grid,
+)
 from ..core.tracker import PositionTracker, PositionUpdate
 from ..engine.analyzer import AnalysisManager
 from ..engine.stockfish_setup import StockfishInfo, ensure_stockfish, probe_stockfish
 from ..engine.uci import UciEngine, UciEngineError
 from ..logging_setup import get_logger
-from ..overlay.dialogs import CorrectionDialog, FenDialog, SettingsDialog
+from ..overlay.dialogs import (
+    BoardRegionSelector,
+    CorrectionDialog,
+    FenDialog,
+    SettingsDialog,
+)
 from ..overlay.main_window import MainOverlay
 from ..overlay.qt_bridge import SignalBridge
 from ..vision.capture import ScreenCapture
@@ -51,6 +61,7 @@ class AppController:
         )
         self._apply_perspective_setting()
         self.window = MainOverlay(config)
+        self.window.set_side_to_move(initial_side == chess.WHITE)
         self.capture = capture or ScreenCapture()
         self.watcher = ScreenWatcher(
             self.pipeline,
@@ -80,6 +91,7 @@ class AppController:
             self.analyzer.start()
         self.hotkeys.start()
         self.window.cover_screen()
+        self.window.exclude_from_capture(True)
         self.window.set_click_through(self.config.overlay.click_through)
         self.window.show()
         self.bridge.status_message.emit("Overlay ready.")
@@ -152,6 +164,9 @@ class AppController:
         window.fen_requested.connect(self._open_fen_dialog)
         window.correction_requested.connect(self._open_correction_dialog)
         window.calibration_requested.connect(self._calibrate)
+        window.board_region_requested.connect(self._select_board_region)
+        window.turn_toggle_requested.connect(self._toggle_turn)
+        window.perspective_toggle_requested.connect(self._toggle_perspective)
         window.settings_requested.connect(self._open_settings)
 
     def _connect_bridge(self) -> None:
@@ -173,6 +188,8 @@ class AppController:
     def _handle_position_on_gui_thread(
         self, update: PositionUpdate, result: RecognitionResult
     ) -> None:
+        self.window.set_side_to_move(update.board.turn == chess.WHITE)
+        self.window.clear_error()
         self.window.reset_hidden_moves()
 
     # ------------------------------------------------------------- controls
@@ -204,29 +221,145 @@ class AppController:
             return
         self.analyzer.reanalyze()
 
+    def _toggle_turn(self) -> None:
+        new_color = not self.tracker.side_to_move
+        self.tracker.set_side_to_move(new_color)
+        self.window.set_side_to_move(new_color == chess.WHITE)
+        if self.tracker.fen and self.analyzer is not None:
+            self.analyzer.request_analysis(self.tracker.fen)
+        side_label = "White (w)" if new_color == chess.WHITE else "Black (b)"
+        self.bridge.status_message.emit(f"Side to move switched to {side_label}.")
+
+    def _toggle_perspective(self) -> None:
+        current = True
+        if self.pipeline.manual_perspective is not None:
+            current = self.pipeline.manual_perspective
+        elif self.window._recognition is not None and self.window._recognition.success:
+            current = self.window._recognition.perspective_white
+        new_persp = not current
+        self.pipeline.set_manual_perspective(new_persp)
+        self.config.vision.perspective = "white" if new_persp else "black"
+        self.pipeline.reset_stability()
+        self.tracker.reset(self.tracker.side_to_move)
+        self.watcher.trigger_now()
+        label = "White" if new_persp else "Black"
+        self.window.perspective_label.setText(f"Perspective: {label} (bottom)")
+        self.bridge.status_message.emit(f"Perspective flipped: {label} at bottom.")
+
+    def _select_board_region(self) -> None:
+        was_visible = self.window.isVisible()
+        if was_visible:
+            self.window.hide()
+        try:
+            selector = BoardRegionSelector()
+            accepted = selector.exec_() == BoardRegionSelector.Accepted
+        finally:
+            if was_visible:
+                self.window.show()
+                self.window.raise_()
+        if not accepted:
+            return
+        if selector.reset_to_auto:
+            self.pipeline.clear_manual_corners()
+            self.pipeline.reset_stability()
+            self.watcher.trigger_now()
+            self.bridge.status_message.emit("Automatic full-screen board detection enabled.")
+        elif selector.selected_corners is not None:
+            self.pipeline.set_manual_corners(selector.selected_corners)
+            self.window.clear_error()
+            self.watcher.trigger_now()
+            self.bridge.status_message.emit("Board area locked to selected region.")
+
     def _open_fen_dialog(self) -> None:
         current = self.tracker.fen or chess.STARTING_FEN
         dialog = FenDialog(current, self.window)
         if dialog.exec_() == FenDialog.Accepted:
-            update = self.tracker.set_manual_fen(dialog.fen())
-            if update.accepted and self.analyzer is not None:
-                self.analyzer.request_analysis(update.fen)
-            self.bridge.status_message.emit("Manual FEN applied.")
+            raw_fen = (
+                self.window._recognition.fen
+                if self.window._recognition and self.window._recognition.success
+                else None
+            )
+            update = self.tracker.set_manual_fen(dialog.fen(), raw_vision_fen=raw_fen)
+            if update.accepted:
+                persp = (
+                    self.window._recognition.perspective_white
+                    if self.window._recognition and self.window._recognition.success
+                    else (self.pipeline.manual_perspective if self.pipeline.manual_perspective is not None else True)
+                )
+                screen_grid = board_grid_to_screen_grid(
+                    board_to_grid(update.board), persp
+                )
+                self.pipeline.apply_manual_correction(
+                    screen_grid, persp, learn_templates=False
+                )
+                self.window.set_side_to_move(update.board.turn == chess.WHITE)
+                self.window.clear_error()
+                if self.analyzer is not None:
+                    self.analyzer.request_analysis(update.fen)
+                self.bridge.status_message.emit("Manual FEN applied.")
+            else:
+                self.bridge.error_message.emit(update.reason)
 
     def _open_correction_dialog(self) -> None:
-        if self.window._recognition is None or not self.window._recognition.success:
-            self.bridge.error_message.emit("No recognized board available to correct.")
-            return
         latest = self.window._recognition
+        if latest is not None and latest.success and latest.screen_grid is not None:
+            screen_grid = latest.screen_grid
+            perspective_white = latest.perspective_white
+            uncertain = latest.uncertain_squares
+            raw_fen = latest.fen
+        else:
+            perspective_white = (
+                self.pipeline.manual_perspective
+                if self.pipeline.manual_perspective is not None
+                else True
+            )
+            base_board = self.tracker.board or chess.Board()
+            screen_grid = board_grid_to_screen_grid(
+                board_to_grid(base_board), perspective_white
+            )
+            uncertain = []
+            raw_fen = None
+
+        side_str = "w" if self.tracker.side_to_move == chess.WHITE else "b"
         dialog = CorrectionDialog(
-            latest.screen_grid, latest.perspective_white, self.window
+            screen_grid,
+            perspective_white,
+            self.window,
+            side_to_move=side_str,
+            uncertain_squares=uncertain,
         )
         if dialog.exec_() == CorrectionDialog.Accepted:
             fen = dialog.corrected_fen()
-            update = self.tracker.set_manual_fen(fen)
-            if update.accepted and self.analyzer is not None:
-                self.analyzer.request_analysis(update.fen)
-            self.bridge.status_message.emit("Manual correction applied.")
+            corrected_screen = dialog.corrected_screen_grid()
+            new_persp = dialog.perspective_white
+            learn = dialog.learn_check.isChecked()
+            self.pipeline.apply_manual_correction(
+                corrected_screen, new_persp, learn_templates=learn
+            )
+            if learn and self.recognizer.calibrated:
+                try:
+                    self.recognizer.save(TEMPLATE_PATH)
+                except ValueError:
+                    pass
+            update = self.tracker.set_manual_fen(fen, raw_vision_fen=raw_fen)
+            if update.accepted:
+                self.window.set_side_to_move(update.board.turn == chess.WHITE)
+                self.window.clear_error()
+                updated_rec = RecognitionResult(
+                    success=True,
+                    fen=update.fen,
+                    screen_grid=corrected_screen,
+                    board_grid=screen_grid_to_board_grid(corrected_screen, new_persp),
+                    perspective_white=new_persp,
+                    detection=latest.detection if latest else self.pipeline.last_detection,
+                    mean_confidence=1.0,
+                )
+                self.window.update_recognition(updated_rec)
+                if self.analyzer is not None:
+                    self.analyzer.request_analysis(update.fen)
+                self.bridge.status_message.emit("Manual correction applied.")
+            else:
+                self.bridge.error_message.emit(update.reason)
 
     def _calibrate(self) -> None:
         try:
@@ -243,6 +376,7 @@ class AppController:
             self.recognizer.save(TEMPLATE_PATH)
         except ValueError:
             pass
+        self.watcher.trigger_now()
         self.bridge.status_message.emit(
             f"Calibrated {count} piece templates from the visible board."
         )

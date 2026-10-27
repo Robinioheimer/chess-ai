@@ -14,10 +14,16 @@ resizable overlay** — without modifying the underlying application.
 
 ### Board recognition
 - Automatic chessboard detection from screenshots at different sizes, board
-  colors, rotations and perspectives (White or Black at the bottom).
-- Full 8×8 piece recognition combining shape heuristics with an optional
-  one-click **template calibration** learned from a visible starting position
-  (handles custom piece designs).
+  colors, rotations and perspectives (White or Black at the bottom), including
+  boards nested inside browser/app windows and borderless boards whose light or
+  dark edge squares match the page background (via a 7×7 internal X-corner
+  saddle lattice detector).
+- Optional **⬚ Select board** rubber-band tool to manually lock detection onto
+  a specific screen rectangle (or reset to full-screen auto-detection).
+- Full 8×8 piece recognition combining shape heuristics, adaptive board-wide
+  piece-color clustering, chess-legality rules (no back-rank pawns, guaranteed
+  single king per side), and one-click **template calibration** learned from a
+  visible starting position or from manual corrections.
 - Robust to screenshot noise and JPEG blur: an Otsu contrast floor and a
   largest-component gate reject sensor/compression artifacts on empty squares.
 - Supports the standard starting position and arbitrary legal positions.
@@ -27,8 +33,10 @@ resizable overlay** — without modifying the underlying application.
 - Stability filtering (N identical readings) plus a stateful position tracker
   suppress flicker and duplicate move detections; the side to move alternates
   automatically after every detected move.
-- **Manual FEN input** and an 8×8 **correction grid** for misrecognized squares;
-  low-confidence squares are listed in the panel.
+- **Manual FEN input** and an 8×8 **correction grid** (`✎ Correct board`) with
+  coordinate labels, highlighted low-confidence squares, one-click orientation
+  flip, and automatic template learning so manual corrections persist and are
+  not overwritten on the next screen poll.
 
 ### Stockfish analysis
 - Raw UCI integration over a long-lived subprocess — the engine is started
@@ -74,9 +82,11 @@ The UI keeps these concepts strictly separate (see panel legend):
 ### Controls
 - Global show/hide hotkey (default `Ctrl+Alt+S`, pynput — works while another
   app is focused; the app also runs without pynput).
-- Pause/resume, Reanalyze, manual FEN, correction grid, piece calibration,
-  Settings dialog.
-- Automatic White/Black perspective detection with manual override.
+- Pause/resume, Reanalyze, **⬚ Select board** (manual board area lock),
+  **✎ Correct board** (8×8 piece editor), **FEN** input, **◈ Calibrate pieces**,
+  **⇄ Turn** (toggle White/Black to move), **⇅ Flip** (toggle White/Black at
+  bottom), and Settings dialog.
+- Automatic White/Black perspective detection with one-click manual override.
 - Clear error messages for recognition and engine communication failures
   (dismissible banner plus rotating diagnostic logs).
 

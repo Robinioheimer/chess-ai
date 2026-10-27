@@ -182,6 +182,19 @@ def extract_cell_features(cell: np.ndarray) -> CellFeatures:
         luminance = bg_hsv - 40
 
     normalized = cv2.resize(filled, (MASK_SIZE, MASK_SIZE), interpolation=cv2.INTER_NEAREST)
+    # Strip isolated 1-2px halo spikes at the very top of the normalized mask
+    # so they cannot skew y0, top_width_ratio or top_offset.
+    for _ in range(6):
+        occ_rows = np.where((normalized > 0).any(axis=1))[0]
+        if occ_rows.size < 4:
+            break
+        r0 = int(occ_rows[0])
+        w0 = int((normalized[r0] > 0).sum())
+        w2 = int((normalized[min(MASK_SIZE - 1, r0 + 2)] > 0).sum())
+        if w0 <= 2 and w2 <= 3:
+            normalized[r0, :] = 0
+        else:
+            break
     ys, xs = np.where(normalized > 0)
     x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
     bw, bh = max(1, x1 - x0 + 1), max(1, y1 - y0 + 1)
@@ -218,12 +231,12 @@ def extract_cell_features(cell: np.ndarray) -> CellFeatures:
     crossbar_ratio = float(row_widths.max()) / MASK_SIZE if row_widths.size else 0.0
 
     # Horizontal offset of the topmost pixels: an off-centre top identifies
-    # the knight's snout even when its outline is partially lost.
+    # the knight's snout even when its outline is partially lost. Averaging
+    # over the top few occupied rows avoids single-pixel anti-aliasing jitter.
     top_rows = np.where((normalized > 0).any(axis=1))[0]
     if top_rows.size:
-        topmost = top_rows[0]
-        top_cols = np.where(normalized[topmost] > 0)[0]
-        top_center_x = float(top_cols.mean())
+        _, top_cols = np.where(normalized[top_rows[:4]] > 0)
+        top_center_x = float(top_cols.mean()) if top_cols.size else MASK_SIZE / 2.0
     else:
         top_center_x = MASK_SIZE / 2.0
     top_offset = abs(top_center_x - MASK_SIZE / 2.0) / MASK_SIZE

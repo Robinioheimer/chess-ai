@@ -48,7 +48,7 @@ class VisionConfig:
     poll_interval_ms: int = 1000      # time between screen captures
     warp_size: int = 480              # size of the warped board image
     stable_readings: int = 2          # identical readings required to accept change
-    min_board_fraction: float = 0.08  # board must cover >=8% of the screenshot
+    min_board_fraction: float = 0.02  # board must cover >=2% of the screenshot
     auto_orientation: bool = True
     perspective: str = "auto"         # "auto" | "white" | "black"
     side_to_move_default: str = "w"   # used before any move is observed

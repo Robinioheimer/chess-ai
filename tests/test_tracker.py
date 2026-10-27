@@ -64,3 +64,28 @@ def test_placement_only_fen_is_normalized():
     tracker = PositionTracker()
     update = tracker.observe_placement_fen(chess.Board().board_fen())
     assert update.accepted
+
+
+def test_manual_fen_not_overwritten_by_unchanged_raw_vision_fen():
+    tracker = PositionTracker()
+    raw_fen = chess.STARTING_FEN
+    tracker.observe_placement_fen(raw_fen)
+
+    corrected = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+    update = tracker.set_manual_fen(corrected, raw_vision_fen=raw_fen)
+    assert update.accepted and update.changed
+    assert tracker.board.turn == chess.BLACK
+
+    # Subsequent tick with the same pre-correction raw vision FEN must NOT overwrite manual FEN
+    dup = tracker.observe_placement_fen(raw_fen)
+    assert dup.accepted and not dup.changed
+    assert tracker.board.board_fen() == chess.Board(corrected).board_fen()
+    assert tracker.board.turn == chess.BLACK
+
+    # Once a genuinely new position appears on screen, normal tracking resumes
+    next_board = chess.Board(corrected)
+    next_board.push_san("e5")
+    moved = tracker.observe_placement_fen(next_board.fen())
+    assert moved.accepted and moved.changed
+    assert tracker.board.board_fen() == next_board.board_fen()
+    assert tracker.board.turn == chess.WHITE

@@ -6,7 +6,8 @@ Two complementary classifiers:
   any piece set whose silhouettes follow conventional chess designs.
 * :meth:`classify_template` - nearest-neighbour matching on Hu moments and
   shape features against templates captured from the user's actual board
-  (one click on a known starting position). This handles custom piece sets.
+  (one click on a known starting position, or learned from manual corrections).
+  This handles custom piece sets.
 
 The recognizer always returns a confidence value so the pipeline can flag
 uncertain squares for manual correction.
@@ -63,6 +64,35 @@ def classify_heuristic(features: CellFeatures) -> chess.PieceType:
     return chess.PAWN
 
 
+def classify_non_pawn(features: CellFeatures) -> chess.PieceType:
+    """Classify an occupied square that cannot legally be a pawn (rank 1/8)."""
+    f = features
+    if f.top_offset >= 0.10 and f.symmetry < 0.95:
+        return chess.KNIGHT
+    if f.h_ratio >= 0.82:
+        return chess.KING if f.top_width_ratio <= 0.73 else chess.QUEEN
+    if f.top_width_ratio >= 0.45 or f.width_at_5 >= 0.22:
+        return chess.ROOK
+    if 0.0 < f.width_at_15 <= 0.28:
+        return chess.BISHOP
+    return chess.ROOK
+
+
+def king_likeness(features: CellFeatures) -> float:
+    """Continuous score for how strongly a silhouette resembles a king."""
+    f = features
+    crown_penalty = max(0.0, f.top_width_ratio - 0.73) * 1.2
+    knight_penalty = max(0.0, f.top_offset - 0.12) * 1.5
+    return float(
+        2.2 * f.h_ratio
+        + 1.6 * f.center_protrusion
+        + 0.8 * f.crossbar_ratio
+        + 0.5 * f.symmetry
+        - crown_penalty
+        - knight_penalty
+    )
+
+
 class PieceRecognizer:
     """Template-aware piece recognizer with a heuristic fallback."""
 
@@ -73,12 +103,25 @@ class PieceRecognizer:
         self._vectors: list[np.ndarray] = []
 
     # -------------------------------------------------------- calibration
-    def calibrate_from_cells(self, cells: np.ndarray, symbols: list[list[str | None]]) -> None:
+    def clear_templates(self) -> None:
+        """Remove all learned piece templates."""
+        self._symbols.clear()
+        self._masks.clear()
+        self._vectors.clear()
+
+    def calibrate_from_cells(
+        self,
+        cells: np.ndarray,
+        symbols: list[list[str | None]],
+        replace: bool = False,
+    ) -> None:
         """Learn templates from a board whose pieces are known (e.g. start pos).
 
         ``cells`` is an 8x8 object array of square images in screen order and
         ``symbols`` the matching FEN symbols.
         """
+        if replace:
+            self.clear_templates()
         for row in range(8):
             for col in range(8):
                 symbol = symbols[row][col]
@@ -120,7 +163,11 @@ class PieceRecognizer:
         return bool(self._symbols)
 
     # -------------------------------------------------------- recognition
-    def recognize_cell(self, cell: np.ndarray) -> tuple[chess.Piece | None, float, CellFeatures]:
+    def recognize_cell(
+        self,
+        cell: np.ndarray,
+        color_threshold: float | None = None,
+    ) -> tuple[chess.Piece | None, float, CellFeatures]:
         """Classify one square.
 
         Returns ``(piece, confidence, features)``; ``piece`` is ``None`` for
@@ -129,7 +176,8 @@ class PieceRecognizer:
         features = extract_cell_features(cell)
         if not features.occupied:
             return None, 0.95, features
-        color = chess.WHITE if features.piece_luminance >= self.color_threshold else chess.BLACK
+        threshold = self.color_threshold if color_threshold is None else color_threshold
+        color = chess.WHITE if features.piece_luminance >= threshold else chess.BLACK
 
         if self.calibrated:
             symbol, score = self.classify_template(features, color)

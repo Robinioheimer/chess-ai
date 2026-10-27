@@ -108,6 +108,7 @@ class UciEngine:
         self.id_author: str = ""
         self.options: dict[str, str] = {}
         self.supported_options: dict[str, dict] = {}
+        self._searching: bool = False
 
     # ------------------------------------------------------------ lifecycle
     def start(self) -> None:
@@ -265,28 +266,34 @@ class UciEngine:
             if len(go_tokens) == 1:
                 go_tokens = ["go", "infinite"]
             self._send(" ".join(go_tokens))
+            self._searching = True
 
             import time
             deadline = time.monotonic() + timeout
             bestmove: Optional[str] = None
-            while time.monotonic() < deadline:
-                if stop_event is not None and stop_event.is_set():
-                    self._send("stop")
-                try:
-                    line = self._lines.get(timeout=0.2)
-                except queue.Empty:
-                    if self._process and self._process.poll() is not None:
-                        raise UciEngineError("Engine process exited during search.")
-                    continue
-                if line.startswith("info"):
-                    info = parse_info_line(line)
-                    if info and not info.is_string and on_info is not None:
-                        on_info(info)
-                elif line.startswith("bestmove"):
-                    bestmove = parse_bestmove_line(line)
-                    break
-            else:
-                raise UciEngineError("Analysis timed out.")
+            try:
+                while time.monotonic() < deadline:
+                    if stop_event is not None and stop_event.is_set():
+                        self._send("stop")
+                    try:
+                        line = self._lines.get(timeout=0.05)
+                    except queue.Empty:
+                        if self._process and self._process.poll() is not None:
+                            raise UciEngineError("Engine process exited during search.")
+                        continue
+                    if line.startswith("info"):
+                        info = parse_info_line(line)
+                        if info and not info.is_string and on_info is not None:
+                            on_info(info)
+                    elif line.startswith("bestmove"):
+                        bestmove = parse_bestmove_line(line)
+                        self._searching = False
+                        break
+                else:
+                    raise UciEngineError("Analysis timed out.")
+            finally:
+                if bestmove is not None:
+                    self._searching = False
             return bestmove
 
     def stop(self) -> None:
@@ -295,13 +302,15 @@ class UciEngine:
             self._stop_search_locked()
 
     def _stop_search_locked(self) -> None:
-        if self._process is None:
+        if self._process is None or not self._searching:
             return
         self._send("stop")
         try:
-            self._drain_until(lambda line: line.startswith("bestmove"), 5.0)
+            self._drain_until(lambda line: line.startswith("bestmove"), 2.0)
         except UciEngineError:
             LOGGER.debug("No bestmove seen after stop (engine may have been idle).")
+        finally:
+            self._searching = False
 
     def quit(self) -> None:
         with self._lock:

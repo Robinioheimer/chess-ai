@@ -121,6 +121,9 @@ class ScreenWatcher:
             self.on_error(result.error or "Board recognition failed.")
             return result
         update = self.tracker.observe_placement_fen(result.fen)
-        if update.accepted and update.changed:
+        if not update.accepted:
+            self.on_error(update.reason)
+            return result
+        if update.changed:
             self.on_position(update, result)
         return result

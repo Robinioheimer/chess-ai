@@ -48,3 +48,46 @@ def test_min_fraction_filters_small_contours():
     # With a huge surrounding scene the board occupies less than 8% of area.
     assert detect_board(scene, min_fraction=0.5) is None
     assert detect_board(scene, min_fraction=0.05) is not None
+
+
+def test_detect_board_nested_inside_browser_window_and_wooden_frame():
+    import cv2
+    from chess_ai.vision.synthetic import render_board
+
+    grid = board_to_grid(chess.Board())
+    board_img = render_board(grid, square_px=56)
+    scene = np.full((900, 1400, 3), (30, 34, 42), dtype=np.uint8)
+    # Outer browser window + header + sidebar + wooden frame around the 8x8 board
+    cv2.rectangle(scene, (50, 40), (1350, 860), (245, 245, 245), -1)
+    cv2.rectangle(scene, (50, 40), (1350, 100), (60, 65, 75), -1)
+    cv2.rectangle(scene, (900, 120), (1320, 820), (220, 220, 225), -1)
+    cv2.rectangle(scene, (170, 150), (170 + 448 + 60, 150 + 448 + 60), (60, 90, 140), -1)
+    scene[180:180 + 448, 200:200 + 448] = board_img
+    truth = np.array([
+        [200, 180], [200 + 447, 180], [200 + 447, 180 + 447], [200, 180 + 447],
+    ], dtype=np.float32)
+
+    detection = detect_board(scene)
+    assert detection is not None
+    assert np.allclose(order_points(detection.corners), truth, atol=6)
+
+
+def test_detect_borderless_board_on_light_and_dark_backgrounds():
+    from chess_ai.vision.synthetic import (
+        DEFAULT_DARK_SQUARE,
+        DEFAULT_LIGHT_SQUARE,
+        render_board,
+    )
+
+    grid = board_to_grid(chess.Board())
+    board_img = render_board(grid, square_px=56)
+    truth = np.array([
+        [220, 110], [220 + 447, 110], [220 + 447, 110 + 447], [220, 110 + 447],
+    ], dtype=np.float32)
+
+    for bg in (DEFAULT_LIGHT_SQUARE, DEFAULT_DARK_SQUARE):
+        scene = np.full((700, 1000, 3), bg, dtype=np.uint8)
+        scene[110:110 + 448, 220:220 + 448] = board_img
+        detection = detect_board(scene)
+        assert detection is not None
+        assert np.allclose(order_points(detection.corners), truth, atol=6)

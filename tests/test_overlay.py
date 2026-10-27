@@ -214,3 +214,60 @@ def test_cover_screen_sets_geometry(qapp):
     screen = QtWidgets.QApplication.primaryScreen()
     assert window.geometry() == screen.availableGeometry()
     window.close()
+
+
+def test_marker_view_renders_board_outline_before_analysis(qapp):
+    window = MainOverlay(AppConfig())
+    scene, _ = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
+    detection = detect_board(scene)
+    from chess_ai.vision.pipeline import RecognitionResult as RecResult
+    recognition = RecResult(
+        success=True,
+        fen=chess.STARTING_FEN,
+        screen_grid=board_to_grid(chess.Board()),
+        board_grid=board_to_grid(chess.Board()),
+        perspective_white=True,
+        detection=detection,
+    )
+    window.update_recognition(recognition)
+    assert window.marker_view._corners is not None
+    assert window.marker_view._markers == []
+    window.close()
+
+
+def test_correction_dialog_quick_actions_and_uncertain_highlighting(qapp):
+    from chess_ai.core.fen_utils import board_grid_to_screen_grid
+
+    grid = board_to_grid(chess.Board())
+    screen_grid = board_grid_to_screen_grid(grid, True)
+    dialog = CorrectionDialog(
+        screen_grid, True, side_to_move="b", uncertain_squares=["e4", "a8"]
+    )
+    assert dialog.corrected_fen().split()[1] == "b"
+    dialog._flip_perspective()
+    assert dialog.perspective_white is False
+    dialog._flip_perspective()
+    assert dialog.perspective_white is True
+    dialog._clear_all()
+    assert all(cell is None for row in dialog.corrected_screen_grid() for cell in row)
+    assert "✗" in dialog.validation_label.text()
+    dialog._reset_to_start()
+    assert "✓" in dialog.validation_label.text()
+    assert chess.Board(dialog.corrected_fen()).board_fen() == chess.Board().board_fen()
+
+
+def test_turn_and_perspective_buttons_emit_signals(qapp):
+    window = MainOverlay(AppConfig())
+    turns = []
+    perspectives = []
+    regions = []
+    window.turn_toggle_requested.connect(lambda: turns.append(True))
+    window.perspective_toggle_requested.connect(lambda: perspectives.append(True))
+    window.board_region_requested.connect(lambda: regions.append(True))
+    window.turn_button.click()
+    window.perspective_button.click()
+    window.select_board_button.click()
+    assert turns == [True]
+    assert perspectives == [True]
+    assert regions == [True]
+    window.close()
