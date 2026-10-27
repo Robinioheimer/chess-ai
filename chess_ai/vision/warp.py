@@ -10,11 +10,21 @@ from .geometry import order_points
 def warp_board(image: np.ndarray, corners: np.ndarray, size: int = 480) -> np.ndarray:
     """Warp the detected board quadrilateral to a square top-down image."""
     src = order_points(corners)
+    native_side = int(round(max(
+        float(np.linalg.norm(src[1] - src[0])),
+        float(np.linalg.norm(src[2] - src[1])),
+        float(np.linalg.norm(src[2] - src[3])),
+        float(np.linalg.norm(src[3] - src[0])),
+    ))) + 1
+    warp_size = min(max(size, native_side), size * 2)
     dst = np.array([
-        [0, 0], [size - 1, 0], [size - 1, size - 1], [0, size - 1]
+        [0, 0], [warp_size - 1, 0], [warp_size - 1, warp_size - 1], [0, warp_size - 1]
     ], dtype=np.float32)
     matrix = cv2.getPerspectiveTransform(src, dst)
-    return cv2.warpPerspective(image, matrix, (size, size))
+    warped = cv2.warpPerspective(image, matrix, (warp_size, warp_size), flags=cv2.INTER_LINEAR)
+    if warp_size != size:
+        warped = cv2.resize(warped, (size, size), interpolation=cv2.INTER_AREA)
+    return warped
 
 
 def split_squares(warped: np.ndarray, inset: float = 0.03) -> np.ndarray:

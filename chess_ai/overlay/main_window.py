@@ -21,9 +21,12 @@ from .candidate_panel import CandidatePanel
 
 STYLESHEET = """
 QWidget#OverlayRoot {
-    background-color: rgba(18, 22, 30, 235);
+    background-color: transparent;
+}
+QWidget#TitleBarWidget, QWidget#ToolbarWidget {
+    background-color: rgba(18, 22, 30, 230);
     border: 1px solid rgba(120, 140, 180, 120);
-    border-radius: 10px;
+    border-radius: 8px;
 }
 QWidget#CandidatePanel {
     background-color: rgba(14, 18, 26, 215);
@@ -85,6 +88,8 @@ class TitleBar(QtWidgets.QWidget):
 
     def __init__(self, window: "MainOverlay") -> None:
         super().__init__(window)
+        self.setObjectName("TitleBarWidget")
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self._window = window
         self._drag_position = None
         self.setFixedHeight(38)
@@ -128,6 +133,9 @@ class MainOverlay(QtWidgets.QWidget):
     fen_requested = QtCore.pyqtSignal()
     correction_requested = QtCore.pyqtSignal()
     calibration_requested = QtCore.pyqtSignal()
+    board_region_requested = QtCore.pyqtSignal()
+    turn_toggle_requested = QtCore.pyqtSignal()
+    perspective_toggle_requested = QtCore.pyqtSignal()
     settings_requested = QtCore.pyqtSignal()
     move_visibility_changed = QtCore.pyqtSignal(str, bool)
     move_focused = QtCore.pyqtSignal(str)
@@ -170,12 +178,16 @@ class MainOverlay(QtWidgets.QWidget):
         body.setSpacing(8)
         body.addStretch(1)
         self.panel = CandidatePanel()
+        self.panel.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.panel.visibility_changed.connect(self._on_visibility_changed)
         self.panel.row_selected.connect(self._on_row_selected)
         body.addWidget(self.panel, 0, QtCore.Qt.AlignTop | QtCore.Qt.AlignRight)
         root.addLayout(body, 1)
 
-        toolbar = QtWidgets.QHBoxLayout()
+        toolbar_container = QtWidgets.QWidget(self)
+        toolbar_container.setObjectName("ToolbarWidget")
+        toolbar_container.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        toolbar = QtWidgets.QHBoxLayout(toolbar_container)
         toolbar.setContentsMargins(10, 4, 10, 6)
         self.pause_button = QtWidgets.QPushButton("⏸ Pause")
         self.pause_button.setCheckable(True)
@@ -186,12 +198,20 @@ class MainOverlay(QtWidgets.QWidget):
         reanalyze.clicked.connect(self.reanalyze_requested.emit)
         toolbar.addWidget(reanalyze)
 
+        self.select_board_button = QtWidgets.QPushButton("⬚ Select board")
+        self.select_board_button.setToolTip(
+            "Drag a rectangle around the chessboard on screen (or reset to auto-detect)"
+        )
+        self.select_board_button.clicked.connect(self.board_region_requested.emit)
+        toolbar.addWidget(self.select_board_button)
+
         fen_button = QtWidgets.QPushButton("FEN")
-        fen_button.setToolTip("Enter a position manually")
+        fen_button.setToolTip("Enter a position manually via FEN")
         fen_button.clicked.connect(self.fen_requested.emit)
         toolbar.addWidget(fen_button)
 
         correct_button = QtWidgets.QPushButton("✎ Correct board")
+        correct_button.setToolTip("Open the 8×8 visual board editor to fix squares or pieces")
         correct_button.clicked.connect(self.correction_requested.emit)
         toolbar.addWidget(correct_button)
 
@@ -200,13 +220,24 @@ class MainOverlay(QtWidgets.QWidget):
         calibrate_button.clicked.connect(self.calibration_requested.emit)
         toolbar.addWidget(calibrate_button)
 
+        self.turn_button = QtWidgets.QPushButton("⇄ Turn: White")
+        self.turn_button.setToolTip("Click to switch whose turn it is (White / Black to move)")
+        self.turn_button.clicked.connect(self.turn_toggle_requested.emit)
+        toolbar.addWidget(self.turn_button)
+
         toolbar.addStretch(1)
         self.perspective_label = QtWidgets.QLabel("Perspective: auto")
         toolbar.addWidget(self.perspective_label)
+
+        self.perspective_button = QtWidgets.QPushButton("⇅ Flip")
+        self.perspective_button.setToolTip("Flip board orientation (White / Black at bottom)")
+        self.perspective_button.clicked.connect(self.perspective_toggle_requested.emit)
+        toolbar.addWidget(self.perspective_button)
+
         settings_button = QtWidgets.QPushButton("⚙ Settings")
         settings_button.clicked.connect(self.settings_requested.emit)
         toolbar.addWidget(settings_button)
-        root.addLayout(toolbar)
+        root.addWidget(toolbar_container)
 
         size_grip = QtWidgets.QSizeGrip(self)
         size_grip.setFixedSize(16, 16)
@@ -232,6 +263,24 @@ class MainOverlay(QtWidgets.QWidget):
         if screen is not None:
             self.setGeometry(screen.availableGeometry())
 
+    def exclude_from_capture(self, enabled: bool = True) -> None:
+        """Exclude the overlay window from screenshots on Windows 10/11.
+
+        Prevents ``mss`` from capturing the overlay's own panel and move arrows
+        on top of the chessboard. Safe no-op on non-Windows platforms.
+        """
+        import sys
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            # WDA_EXCLUDEFROMCAPTURE = 0x00000011, WDA_NONE = 0x00000000
+            affinity = 0x00000011 if enabled else 0x00000000
+            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, affinity)
+        except Exception:  # pragma: no cover - OS version dependent
+            pass
+
     def set_click_through(self, enabled: bool) -> None:
         """Make the overlay ignore mouse input (Windows: WS_EX_TRANSPARENT).
 
@@ -253,6 +302,9 @@ class MainOverlay(QtWidgets.QWidget):
         ctypes.windll.user32.SetWindowLongW(hwnd, -20, styles)
 
     # -------------------------------------------------------------- updates
+    def set_side_to_move(self, is_white: bool) -> None:
+        self.turn_button.setText("⇄ Turn: White" if is_white else "⇄ Turn: Black")
+
     def update_recognition(self, result: RecognitionResult) -> None:
         self._recognition = result
         if result.success:
@@ -268,6 +320,7 @@ class MainOverlay(QtWidgets.QWidget):
 
     def update_analysis(self, result: AnalysisResult) -> None:
         self._analysis = result
+        self.set_side_to_move(result.side_to_move == "w")
         self.panel.update_result(result)
         if not result.error:
             self.panel.set_searching(bool(result.searching))
@@ -288,20 +341,25 @@ class MainOverlay(QtWidgets.QWidget):
         self.panel.set_engine_state(state, text)
 
     def _refresh_markers(self) -> None:
-        if self._recognition is None or not self._recognition.success or self._analysis is None:
+        if (
+            self._recognition is None
+            or not self._recognition.success
+            or self._recognition.detection is None
+        ):
             self.marker_view.clear()
             return
         markers: list[MarkerSpec] = []
-        colors = self.config.overlay.candidate_colors
-        for index, move in enumerate(self._analysis.moves):
-            if move.uci in self._hidden_uci:
-                continue
-            if index == 0:
-                color = self.config.overlay.marker_color_best or BEST_MOVE_COLOR
-                markers.append(MarkerSpec(move.uci, color, True, move.san))
-            else:
-                color = colors[(index - 1) % len(colors)]
-                markers.append(MarkerSpec(move.uci, color, False, move.san))
+        if self._analysis is not None:
+            colors = self.config.overlay.candidate_colors
+            for index, move in enumerate(self._analysis.moves):
+                if move.uci in self._hidden_uci:
+                    continue
+                if index == 0:
+                    color = self.config.overlay.marker_color_best or BEST_MOVE_COLOR
+                    markers.append(MarkerSpec(move.uci, color, True, move.san))
+                else:
+                    color = colors[(index - 1) % len(colors)]
+                    markers.append(MarkerSpec(move.uci, color, False, move.san))
         self.marker_view.set_window_origin(self.geometry().topLeft())
         self.marker_view.update_board(
             self._recognition.detection.corners,

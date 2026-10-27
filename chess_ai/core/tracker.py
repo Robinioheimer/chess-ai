@@ -36,6 +36,7 @@ class PositionTracker:
     def __init__(self, side_to_move: chess.Color = chess.WHITE) -> None:
         self._board: Optional[chess.Board] = None
         self._last_placement: Optional[str] = None  # placement-only FEN (first 4 fields)
+        self._ignored_vision_placement: Optional[str] = None
         self.side_to_move: chess.Color = side_to_move
         self.move_counter: int = 0
 
@@ -82,6 +83,15 @@ class PositionTracker:
             return PositionUpdate(True, False, self._board.fen(), self._board,
                                   "Same position as last reading")
 
+        if (
+            self._ignored_vision_placement is not None
+            and placement_key == self._ignored_vision_placement
+        ):
+            # Screen still shows the pre-correction vision reading; keep manual override.
+            return PositionUpdate(True, False, self._board.fen(), self._board,
+                                  "Same position as last reading (manual override active)")
+        self._ignored_vision_placement = None
+
         move = self._guess_move(self._board, observed)
         # A move happened: flip side to move and adopt the new placement.
         observed.turn = not self._board.turn
@@ -98,15 +108,28 @@ class PositionTracker:
         """Convenience wrapper accepting a board-coordinate piece grid."""
         return self.observe_placement_fen(build_fen(grid, side_to_move))
 
-    def set_manual_fen(self, fen: str) -> PositionUpdate:
+    def set_manual_fen(
+        self, fen: str, raw_vision_fen: Optional[str] = None
+    ) -> PositionUpdate:
         """Apply manually entered or corrected FEN (full FEN is trusted)."""
         ok, message = validate_fen(fen)
         if not ok:
             return self._rejected(fen, f"Invalid FEN: {message}")
         board = parse_fen(fen)
-        changed = self._board is None or self._placement_key(board) != self._last_placement
+        new_key = self._placement_key(board)
+        if raw_vision_fen:
+            try:
+                raw_board = chess.Board(self._normalize(raw_vision_fen))
+                raw_key = self._placement_key(raw_board)
+                if raw_key != new_key:
+                    self._ignored_vision_placement = raw_key
+            except ValueError:
+                pass
+        elif self._last_placement is not None and self._last_placement != new_key:
+            self._ignored_vision_placement = self._last_placement
+        changed = self._board is None or new_key != self._last_placement or board.turn != self.side_to_move
         self._board = board
-        self._last_placement = self._placement_key(board)
+        self._last_placement = new_key
         self.side_to_move = board.turn
         if changed:
             self.move_counter += 1
@@ -123,6 +146,7 @@ class PositionTracker:
         """Forget the current position."""
         self._board = None
         self._last_placement = None
+        self._ignored_vision_placement = None
         self.side_to_move = side_to_move
         self.move_counter = 0
 

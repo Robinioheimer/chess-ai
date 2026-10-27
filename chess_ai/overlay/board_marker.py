@@ -77,7 +77,7 @@ class BoardMarkerView(QtWidgets.QWidget):
         )
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
-        if self._corners is None or not self._markers:
+        if self._corners is None:
             return
         painter = QtGui.QPainter(self)
         try:
@@ -85,7 +85,7 @@ class BoardMarkerView(QtWidgets.QWidget):
 
             # Faint board outline for visual confirmation of detection.
             outline = [self._to_widget(p) for p in self._corners]
-            pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 90), 1.5)
+            pen = QtGui.QPen(QtGui.QColor(78, 123, 216, 160), 2.0)
             painter.setPen(pen)
             painter.drawPolygon(QtGui.QPolygonF(outline))
 

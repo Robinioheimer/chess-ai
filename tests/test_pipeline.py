@@ -121,3 +121,71 @@ def test_calibration_from_starting_position(tmp_path):
     count = pipeline.calibrate_from_starting_position(frame)
     assert count == 32
     assert pipeline.recognizer.calibrated
+
+
+def test_auto_infer_black_perspective_without_manual_override():
+    grid, original = _grid_after_moves(["e4", "c5", "Nf3", "d6"])
+    frame = render_board(grid, square_px=60, perspective_white=False)
+    pipeline = RecognitionPipeline(stable_readings=1)
+    result = pipeline.process_frame(frame)
+    assert result.success
+    assert result.perspective_white is False
+    assert chess.Board(result.fen).board_fen() == original.board_fen()
+
+
+def test_chess_constraints_repair_back_rank_pawns_and_missing_kings():
+    from chess_ai.vision.features import CellFeatures
+
+    pipeline = RecognitionPipeline(stable_readings=1)
+    grid = [[None] * 8 for _ in range(8)]
+    # Back-rank pawn on row 0 col 0, two queens and zero kings
+    grid[0][0] = "p"
+    grid[0][4] = "q"
+    grid[7][0] = "P"
+    grid[7][4] = "Q"
+    confidences = [[0.8] * 8 for _ in range(8)]
+    features_grid = [
+        [CellFeatures(occupied=False) for _ in range(8)]
+        for _ in range(8)
+    ]
+    features_grid[0][0] = CellFeatures(occupied=True, h_ratio=0.78, top_width_ratio=0.60, width_at_15=0.38)
+    features_grid[0][4] = CellFeatures(occupied=True, h_ratio=0.92, center_protrusion=0.08, symmetry=0.96)
+    features_grid[7][0] = CellFeatures(occupied=True, h_ratio=0.78, top_width_ratio=0.60, width_at_15=0.38)
+    features_grid[7][4] = CellFeatures(occupied=True, h_ratio=0.92, center_protrusion=0.08, symmetry=0.96)
+
+    pipeline._enforce_chess_constraints(grid, confidences, features_grid)
+    assert grid[0][0] == "r"
+    assert grid[7][0] == "R"
+    assert grid[0][4] == "k"
+    assert grid[7][4] == "K"
+
+
+def test_manual_correction_persists_until_square_changes():
+    from chess_ai.core.fen_utils import board_grid_to_screen_grid
+
+    grid = board_to_grid(chess.Board())
+    frame = render_board(grid, square_px=60)
+    pipeline = RecognitionPipeline(stable_readings=1)
+    initial = pipeline.process_stable(frame)
+    assert initial.success
+
+    # Simulate user correcting e2 -> empty and e4 -> White Pawn on the same frame
+    e4_board = chess.Board()
+    e4_board.push_san("e4")
+    corrected_screen = board_grid_to_screen_grid(board_to_grid(e4_board), True)
+    pipeline.apply_manual_correction(corrected_screen, True, learn_templates=False)
+
+    # Next tick on the unchanged frame preserves the user's manual correction
+    again = pipeline.process_stable(frame)
+    assert chess.Board(again.fen).board_fen() == e4_board.board_fen()
+
+
+def test_manual_corners_lock_and_clear():
+    scene, truth = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
+    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline.set_manual_corners(truth)
+    result = pipeline.process_frame(scene)
+    assert result.success
+    assert result.detection.method == "manual"
+    pipeline.clear_manual_corners()
+    assert pipeline.manual_corners is None
