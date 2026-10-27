@@ -1,0 +1,9 @@
+# Runtime dependencies for Chess AI Overlay
+# Tested on Windows 10/11 with Python 3.10+
+python-chess>=1.10
+numpy>=1.24
+# headless OpenCV avoids a Qt conflict with PyQt5; the GUI toolkit (PyQt5) provides all windows
+opencv-python-headless>=4.8
+mss>=9.0
+PyQt5>=5.15
+pynput>=1.7
