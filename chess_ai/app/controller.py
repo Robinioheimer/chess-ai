@@ -20,7 +20,12 @@ from ..core.fen_utils import (
 )
 from ..core.tracker import PositionTracker, PositionUpdate
 from ..engine.analyzer import AnalysisManager
-from ..engine.stockfish_setup import StockfishInfo, ensure_stockfish, probe_stockfish
+from ..engine.stockfish_setup import (
+    StockfishInfo,
+    builtin_stockfish_info,
+    ensure_stockfish,
+    probe_stockfish,
+)
 from ..engine.uci import UciEngine, UciEngineError
 from ..logging_setup import get_logger
 from ..overlay.dialogs import (
@@ -111,7 +116,19 @@ class AppController:
     def _start_engine(self) -> None:
         try:
             self.engine_info = ensure_stockfish(self.config.engine.stockfish_path)
-            probe_stockfish(self.engine_info.path)
+            try:
+                engine_name = probe_stockfish(self.engine_info.path)
+                self.engine_info = StockfishInfo(
+                    self.engine_info.path, engine_name, self.engine_info.source
+                )
+            except UciEngineError as probe_exc:
+                LOGGER.warning(
+                    "Engine binary %s failed probe (%s); falling back to built-in UCI engine.",
+                    self.engine_info.path,
+                    probe_exc,
+                )
+                self.engine_info = builtin_stockfish_info()
+                probe_stockfish(self.engine_info.path)
         except UciEngineError as exc:
             LOGGER.error("Stockfish unavailable: %s", exc)
             self.bridge.engine_state.emit(
@@ -132,7 +149,8 @@ class AppController:
                 "path manually in Settings."
             )
             return
-        self.config.engine.stockfish_path = self.engine_info.path
+        if self.engine_info.source != "built-in engine":
+            self.config.engine.stockfish_path = self.engine_info.path
         self.engine = UciEngine(self.engine_info.path)
         self.analyzer = AnalysisManager(
             self.engine,

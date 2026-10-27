@@ -41,10 +41,10 @@ COLOR_LUMINANCE_THRESHOLD = 110.0
 def classify_heuristic(features: CellFeatures) -> chess.PieceType:
     """Rule-based piece-type classification from shape descriptors."""
     f = features
-    # 1. Knight: its snout pushes the topmost pixels well off the centre line.
-    #    Symmetry is required as a second cue so a slightly skewed symmetric
-    #    piece (e.g. an edge-warped rook) is not mistaken for a knight.
-    if f.top_offset >= 0.14 and f.symmetry < 0.94:
+    # 1. Knight: its snout/mane make it the only strongly asymmetric piece.
+    #    Catches both off-centre-top knights (top_offset >= 0.14) and
+    #    centred-ear / left-facing knights (0.40 <= symmetry < 0.885).
+    if (f.top_offset >= 0.14 and f.symmetry < 0.94) or (0.40 <= f.symmetry < 0.885):
         return chess.KNIGHT
     # 2. King: tallest symmetric silhouette with a cross that stays narrower
     #    than the queen's goblet crown (queen crowns span >= 0.74 of width).
@@ -67,7 +67,7 @@ def classify_heuristic(features: CellFeatures) -> chess.PieceType:
 def classify_non_pawn(features: CellFeatures) -> chess.PieceType:
     """Classify an occupied square that cannot legally be a pawn (rank 1/8)."""
     f = features
-    if f.top_offset >= 0.10 and f.symmetry < 0.95:
+    if (f.top_offset >= 0.10 and f.symmetry < 0.95) or (0.40 <= f.symmetry < 0.895):
         return chess.KNIGHT
     if f.h_ratio >= 0.82:
         return chess.KING if f.top_width_ratio <= 0.73 else chess.QUEEN

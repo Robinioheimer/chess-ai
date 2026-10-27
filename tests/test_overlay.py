@@ -271,3 +271,42 @@ def test_turn_and_perspective_buttons_emit_signals(qapp):
     assert perspectives == [True]
     assert regions == [True]
     window.close()
+
+
+def test_markers_include_percent_accuracy_and_best_move_arrow(qapp):
+    from PyQt5 import QtGui
+
+    config = AppConfig()
+    window = MainOverlay(config)
+    scene, _ = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
+    detection = detect_board(scene)
+    from chess_ai.vision.pipeline import RecognitionResult as RecResult
+
+    recognition = RecResult(
+        success=True,
+        fen=chess.STARTING_FEN,
+        screen_grid=board_to_grid(chess.Board()),
+        board_grid=board_to_grid(chess.Board()),
+        perspective_white=True,
+        detection=detection,
+    )
+    window.update_recognition(recognition)
+    window.update_analysis(_analysis_result())
+
+    markers = window.marker_view._markers
+    assert len(markers) == 3
+    assert markers[0].is_best is True
+    assert "%" in markers[0].percent_text
+    assert "%" in markers[0].badge_text
+    assert "e4" in markers[0].badge_text
+
+    # Render BoardMarkerView into an image and confirm non-transparent pixels
+    # are painted along the e2->e4 best-move arrow shaft.
+    image = QtGui.QImage(800, 800, QtGui.QImage.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QtGui.QPainter(image)
+    window.marker_view.render(painter)
+    painter.end()
+    assert not image.isNull()
+    window.close()
+

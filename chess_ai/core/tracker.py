@@ -73,6 +73,9 @@ class PositionTracker:
             observed.turn = self.side_to_move
             observed.castling_rights = 0
             observed.ep_square = None
+            if observed.was_into_check():
+                observed.turn = not observed.turn
+                self.side_to_move = observed.turn
             self._board = observed
             self._last_placement = placement_key
             LOGGER.info("Initial position accepted (%s)", observed.fen())
@@ -97,6 +100,9 @@ class PositionTracker:
         observed.turn = not self._board.turn
         observed.castling_rights = 0
         observed.ep_square = None
+        if observed.was_into_check():
+            observed.turn = not observed.turn
+        self.side_to_move = observed.turn
         self._board = observed
         self._last_placement = placement_key
         self.move_counter += 1

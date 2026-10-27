@@ -189,3 +189,39 @@ def test_manual_corners_lock_and_clear():
     assert result.detection.method == "manual"
     pipeline.clear_manual_corners()
     assert pipeline.manual_corners is None
+
+
+def test_auto_calibration_on_early_opening_position():
+    board = chess.Board()
+    for san in ("e4", "e5", "Nf3", "Nc6"):
+        board.push_san(san)
+    scene, _ = render_scene(board_to_grid(board), square_px=60, padding=60)
+    pipeline = RecognitionPipeline(stable_readings=1)
+    assert not pipeline.recognizer.calibrated
+    result = pipeline.process_stable(scene)
+    assert result.success
+    assert pipeline.recognizer.calibrated
+    assert chess.Board(result.fen).board_fen() == board.board_fen()
+
+
+def test_move_continuity_tracks_sequence_of_moves():
+    board = chess.Board()
+    pipeline = RecognitionPipeline(stable_readings=1)
+    for san in ("e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O"):
+        board.push_san(san)
+        scene, _ = render_scene(board_to_grid(board), square_px=60, padding=60)
+        result = pipeline.process_stable(scene)
+        assert result.success
+        assert chess.Board(result.fen).board_fen() == board.board_fen()
+
+
+def test_corner_coordinate_label_does_not_trigger_occupancy():
+    import cv2
+    import numpy as np
+    from chess_ai.vision.features import extract_cell_features
+
+    cell = np.full((64, 64, 3), (235, 236, 208), dtype=np.uint8)
+    # Draw a dark rank/file label '8' in the top-left corner of an empty square.
+    cv2.putText(cell, "8", (3, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (90, 110, 70), 1)
+    features = extract_cell_features(cell)
+    assert not features.occupied

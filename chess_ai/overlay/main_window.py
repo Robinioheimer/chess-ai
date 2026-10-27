@@ -173,6 +173,20 @@ class MainOverlay(QtWidgets.QWidget):
         self.marker_view.lower()
         self.marker_view.setGeometry(self.rect())
 
+        # Companion full-screen click-through marker layer so move arrows and
+        # % accuracy badges remain visible on the chessboard even when the user
+        # drags or resizes the control panel window off the board.
+        self.screen_marker_view = BoardMarkerView(None)
+        self.screen_marker_view.setWindowTitle("Chess AI Board Markers")
+        self.screen_marker_view.setWindowFlags(
+            QtCore.Qt.FramelessWindowHint
+            | QtCore.Qt.WindowStaysOnTopHint
+            | QtCore.Qt.Tool
+            | QtCore.Qt.WindowTransparentForInput
+        )
+        self.screen_marker_view.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        self.screen_marker_view.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+
         body = QtWidgets.QHBoxLayout()
         body.setContentsMargins(8, 4, 8, 4)
         body.setSpacing(8)
@@ -274,10 +288,11 @@ class MainOverlay(QtWidgets.QWidget):
             return
         try:
             import ctypes
-            hwnd = int(self.winId())
             # WDA_EXCLUDEFROMCAPTURE = 0x00000011, WDA_NONE = 0x00000000
             affinity = 0x00000011 if enabled else 0x00000000
-            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, affinity)
+            for widget in (self, self.screen_marker_view):
+                hwnd = int(widget.winId())
+                ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, affinity)
         except Exception:  # pragma: no cover - OS version dependent
             pass
 
@@ -340,6 +355,14 @@ class MainOverlay(QtWidgets.QWidget):
     def set_engine_state(self, state: str, text: str) -> None:
         self.panel.set_engine_state(state, text)
 
+    def _board_inside_window(self, corners) -> bool:
+        """Return True if all four board corners lie inside this window."""
+        rect = self.geometry()
+        return all(
+            rect.contains(int(pt[0]), int(pt[1]))
+            for pt in corners
+        )
+
     def _refresh_markers(self) -> None:
         if (
             self._recognition is None
@@ -347,6 +370,8 @@ class MainOverlay(QtWidgets.QWidget):
             or self._recognition.detection is None
         ):
             self.marker_view.clear()
+            self.screen_marker_view.clear()
+            self.screen_marker_view.hide()
             return
         markers: list[MarkerSpec] = []
         if self._analysis is not None:
@@ -356,16 +381,45 @@ class MainOverlay(QtWidgets.QWidget):
                     continue
                 if index == 0:
                     color = self.config.overlay.marker_color_best or BEST_MOVE_COLOR
-                    markers.append(MarkerSpec(move.uci, color, True, move.san))
+                    markers.append(MarkerSpec(
+                        move.uci, color, True, move.san,
+                        percent_text=move.win_percent_text, rank=index + 1,
+                    ))
                 else:
                     color = colors[(index - 1) % len(colors)]
-                    markers.append(MarkerSpec(move.uci, color, False, move.san))
+                    markers.append(MarkerSpec(
+                        move.uci, color, False, move.san,
+                        percent_text=move.win_percent_text, rank=index + 1,
+                    ))
+        corners = self._recognition.detection.corners
+        perspective_white = self._recognition.perspective_white
         self.marker_view.set_window_origin(self.geometry().topLeft())
-        self.marker_view.update_board(
-            self._recognition.detection.corners,
-            self._recognition.perspective_white,
-            markers,
-        )
+        self.marker_view.update_board(corners, perspective_white, markers)
+
+        # If this window is visible and does not fully cover the detected board
+        # (for example, the user dragged/resized the control panel to the side),
+        # render the arrows on the full-screen click-through companion layer.
+        screen = QtWidgets.QApplication.primaryScreen()
+        if self.isVisible() and screen is not None and not self._board_inside_window(corners):
+            avail = screen.availableGeometry()
+            self.screen_marker_view.setGeometry(avail)
+            self.screen_marker_view.set_window_origin(avail.topLeft())
+            self.screen_marker_view.update_board(corners, perspective_white, markers)
+            if not self.screen_marker_view.isVisible():
+                self.screen_marker_view.show()
+                self.exclude_from_capture(True)
+        else:
+            self.screen_marker_view.update_board(corners, perspective_white, markers)
+            if self.screen_marker_view.isVisible():
+                self.screen_marker_view.hide()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self.screen_marker_view.hide()
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self.screen_marker_view.close()
+        super().closeEvent(event)
 
     def moveEvent(self, event) -> None:  # noqa: N802
         super().moveEvent(event)

@@ -65,3 +65,52 @@ def test_ensure_stockfish_uses_downloader(monkeypatch, tmp_path):
     monkeypatch.setattr(stockfish_setup, "download_stockfish", lambda *a, **k: sentinel)
     info = stockfish_setup.ensure_stockfish(auto_download=True)
     assert info is sentinel
+
+
+def test_rank_stockfish_binary_prefers_compatible_over_avx512():
+    avx512 = Path("stockfish-windows-x86-64-avx512.exe")
+    bmi2 = Path("stockfish-windows-x86-64-bmi2.exe")
+    avx2 = Path("stockfish-windows-x86-64-avx2.exe")
+    sse41 = Path("stockfish-windows-x86-64-sse41-popcnt.exe")
+    ranked = sorted([avx512, bmi2, sse41, avx2], key=stockfish_setup._rank_stockfish_binary)
+    assert ranked[0] == avx2
+    assert ranked[1] == sse41
+    assert ranked[-1] == avx512
+
+
+def test_builtin_engine_handshake_and_analysis():
+    import chess
+    from chess_ai.engine.uci import UciEngine
+
+    info = stockfish_setup.builtin_stockfish_info()
+    name = stockfish_setup.probe_stockfish(info.path)
+    assert "ChessAI Built-in Engine" in name
+
+    engine = UciEngine(info.path)
+    engine.start()
+    try:
+        infos = []
+        bestmove = engine.analyze(
+            chess.STARTING_FEN,
+            depth=2,
+            multipv=3,
+            on_info=infos.append,
+            timeout=10.0,
+        )
+        assert bestmove is not None
+        assert len(bestmove) >= 4
+        assert any(i.pv for i in infos)
+    finally:
+        engine.quit()
+
+
+def test_ensure_stockfish_falls_back_to_builtin_when_download_fails(monkeypatch):
+    monkeypatch.setattr(stockfish_setup, "find_stockfish", lambda *a, **k: None)
+    monkeypatch.setattr(
+        stockfish_setup,
+        "download_stockfish",
+        lambda *a, **k: (_ for _ in ()).throw(UciEngineError("offline")),
+    )
+    info = stockfish_setup.ensure_stockfish(auto_download=True)
+    assert info.source == "built-in engine"
+
