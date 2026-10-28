@@ -209,6 +209,10 @@ class AppController:
         self.window.set_side_to_move(update.board.turn == chess.WHITE)
         self.window.clear_error()
         self.window.reset_hidden_moves()
+        # Trigger marker refresh immediately when recognition succeeds.
+        if result.success and result.detection is not None and self.window._recognition is not None:
+            self.window._recognition = result
+            self.window._refresh_markers()
 
     # ------------------------------------------------------------- controls
     def _toggle_overlay_visibility(self) -> None:

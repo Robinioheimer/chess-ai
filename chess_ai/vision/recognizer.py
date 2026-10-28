@@ -35,6 +35,8 @@ FEATURE_KEYS = (
 )
 # Roughly calibrated acceptance threshold (lower is better for the score).
 TEMPLATE_ACCEPTANCE = 2.2
+# Relaxed fallback for challenging piece shapes.
+TEMPLATE_ACCEPTANCE_RELAXED = 3.5
 COLOR_LUMINANCE_THRESHOLD = 110.0
 
 
@@ -184,6 +186,12 @@ class PieceRecognizer:
             if symbol is not None and score <= TEMPLATE_ACCEPTANCE:
                 piece_type = chess.PIECE_SYMBOLS.index(symbol.lower())
                 confidence = float(np.clip(1.0 - score / (TEMPLATE_ACCEPTANCE * 1.6), 0.45, 0.99))
+                return chess.Piece(piece_type, color), confidence, features
+            # Relaxed match: accept slightly weaker template match if shape is close.
+            if symbol is not None and score <= TEMPLATE_ACCEPTANCE_RELAXED:
+                piece_type = chess.PIECE_SYMBOLS.index(symbol.lower())
+                confidence = float(np.clip(0.55 - (score - TEMPLATE_ACCEPTANCE) / 4.0, 0.35, 0.75))
+                LOGGER.debug("Relaxed template match (%.2f) for %s", score, symbol)
                 return chess.Piece(piece_type, color), confidence, features
             LOGGER.debug("Template match weak (%.2f), using heuristic fallback", score)
 

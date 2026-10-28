@@ -364,6 +364,7 @@ class MainOverlay(QtWidgets.QWidget):
         )
 
     def _refresh_markers(self) -> None:
+        # Always show board outline and markers when recognition succeeded.
         if (
             self._recognition is None
             or not self._recognition.success
@@ -374,10 +375,13 @@ class MainOverlay(QtWidgets.QWidget):
             self.screen_marker_view.hide()
             return
         markers: list[MarkerSpec] = []
-        if self._analysis is not None:
+        # Show analysis moves when available.
+        if self._analysis is not None and self._analysis.moves:
             colors = self.config.overlay.candidate_colors
             for index, move in enumerate(self._analysis.moves):
                 if move.uci in self._hidden_uci:
+                    continue
+                if not move.visible:
                     continue
                 if index == 0:
                     color = self.config.overlay.marker_color_best or BEST_MOVE_COLOR
@@ -391,6 +395,14 @@ class MainOverlay(QtWidgets.QWidget):
                         move.uci, color, False, move.san,
                         percent_text=move.win_percent_text, rank=index + 1,
                     ))
+        # Even without analysis, draw at least the best-move arrow if we have
+        # a recognized position and a previous best move is tracked.
+        if not markers and self._analysis is not None and self._analysis.best_move:
+            best = self._analysis.best_move
+            markers.append(MarkerSpec(
+                best.uci, BEST_MOVE_COLOR, True, best.san,
+                percent_text=best.win_percent_text, rank=1,
+            ))
         corners = self._recognition.detection.corners
         perspective_white = self._recognition.perspective_white
         self.marker_view.set_window_origin(self.geometry().topLeft())
