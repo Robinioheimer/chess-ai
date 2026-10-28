@@ -120,6 +120,8 @@ class RecognitionPipeline:
         self.manual_corners: Optional[np.ndarray] = None  # None = automatic
         # Map (screen_row, screen_col) -> (corrected_symbol, raw_symbol_when_set)
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
+        # Prevent auto-calibration from running repeatedly.
+        self._calibration_attempted: bool = False
 
     # ----------------------------------------------------------- detection
     def _pad_frame(self, frame: np.ndarray) -> tuple[np.ndarray, int]:
@@ -255,6 +257,8 @@ class RecognitionPipeline:
         self._candidate_count = 0
         self._last_detection = None
         self._square_overrides.clear()
+        # Allow a fresh calibration attempt after a full reset.
+        self._calibration_attempted = False
 
     # ------------------------------------------------------------------ run
     def process_frame(self, frame: np.ndarray) -> RecognitionResult:
@@ -411,8 +415,9 @@ class RecognitionPipeline:
         squares lets the recognizer classify the moved pieces in rows 2..5
         using the board's actual piece theme.
         """
-        if self.recognizer.calibrated:
+        if self.recognizer.calibrated or self._calibration_attempted:
             return None
+        self._calibration_attempted = True
         top_white = sum(1 for r in (0, 1) for c in range(8) if grid[r][c] and grid[r][c].isupper())
         top_black = sum(1 for r in (0, 1) for c in range(8) if grid[r][c] and grid[r][c].islower())
         bot_white = sum(1 for r in (6, 7) for c in range(8) if grid[r][c] and grid[r][c].isupper())
