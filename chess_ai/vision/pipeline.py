@@ -314,6 +314,7 @@ class RecognitionPipeline:
             result.error = None
             LOGGER.debug("Awaiting stable reading %d/%d",
                          self._candidate_count, self.stable_readings)
+            # Return the previous stable grid with updated perspective/detection.
             stable = RecognitionResult(
                 success=True,
                 fen=build_fen(screen_grid_to_board_grid(
@@ -328,6 +329,7 @@ class RecognitionPipeline:
                 mean_confidence=result.mean_confidence,
             )
             return stable
+        # Stable reading reached: accept the new grid.
         self._last_grid = result.screen_grid
         self._candidate_grid = None
         self._candidate_count = 0
@@ -689,6 +691,18 @@ class RecognitionPipeline:
                 confidences[row][col] = confidence
                 if piece is not None:
                     grid[row][col] = piece.symbol()
+                # If the recognizer returned a very low confidence but still
+                # identified a piece, trust the shape classification over the
+                # empty-square fallback when occupancy is clearly present.
+                else:
+                    feature = features_grid[row][col]
+                    if feature.occupied and feature.occupancy_ratio > 0.12:
+                        # Fallback to heuristic classification for clearly occupied squares.
+                        from .recognizer import classify_heuristic
+                        piece_type = classify_heuristic(feature)
+                        color = chess.WHITE if feature.piece_luminance >= threshold else chess.BLACK
+                        grid[row][col] = chess.Piece(piece_type, color).symbol()
+                        confidences[row][col] = max(confidences[row][col], 0.55)
 
         # If an early opening layout (1-4 moves played) is visible and the
         # recognizer is not yet calibrated, learn templates from the unmoved
