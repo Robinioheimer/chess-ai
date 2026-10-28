@@ -391,6 +391,11 @@ def detect_board(image: np.ndarray, min_fraction: float = 0.02) -> BoardDetectio
     scored.sort(key=lambda item: (round(item[0], 2), item[1].confidence), reverse=True)
 
     best_score, best = scored[0]
+    # If best score is low, prefer the most stable previous detection
+    # to avoid sudden jumps ("verrutschen") of the board region.
+    if best_score < 0.35 and best is not None:
+        # Note: detect_board is stateless; stability is handled by pipeline.
+        pass
     if best_score < 0.35:
         # No convincing grid: if a saddle lattice was found, prefer it;
         # otherwise fall back to the largest contour only if it has some grid structure.

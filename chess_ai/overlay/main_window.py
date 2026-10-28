@@ -159,6 +159,8 @@ class MainOverlay(QtWidgets.QWidget):
         self._build_ui()
         self.apply_opacity(config.overlay.opacity)
         self.apply_scale(config.overlay.scale)
+        # Start refresh timer so arrows don't disappear.
+        self._start_refresh_timer()
 
     # ------------------------------------------------------------------ ui
     def _build_ui(self) -> None:
@@ -354,6 +356,16 @@ class MainOverlay(QtWidgets.QWidget):
 
     def set_engine_state(self, state: str, text: str) -> None:
         self.panel.set_engine_state(state, text)
+
+    # Regular refresh timer so arrows don't disappear between analysis ticks.
+    def _start_refresh_timer(self) -> None:
+        try:
+            timer = QtCore.QTimer(self)
+            timer.timeout.connect(self._refresh_markers)
+            timer.start(300)  # refresh every 300 ms
+            self._refresh_timer = timer
+        except Exception:
+            pass
 
     def _board_inside_window(self, corners) -> bool:
         """Return True if all four board corners lie inside this window."""

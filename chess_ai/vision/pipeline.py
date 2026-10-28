@@ -157,8 +157,23 @@ class RecognitionPipeline:
             return detection, padded, padding
 
         detection = detect_board(padded, min_fraction=self.min_board_fraction)
+        # If a previous detection exists and the new one jumps too far,
+        # prefer the previous corners to avoid "verrutschen".
+        if detection is not None and self._last_detection is not None:
+            prev = self._last_detection.corners
+            curr = detection.corners
+            jump = float(np.linalg.norm(curr - prev, axis=1).mean())
+            if jump > 60:  # more than ~60 px jump → likely false detection
+                LOGGER.debug("Board detection jumped %.0f px; keeping previous", jump)
+                detection = self._last_detection
+                # But still return the new frame for recognition consistency.
         if detection is None:
-            return None, padded, padding
+            # Try using previous stable detection if available, but adjust for padding.
+            if self._last_detection is not None:
+                LOGGER.info("Using previous stable board detection (no new board found)")
+                detection = self._last_detection
+            else:
+                return None, padded, padding
         if padding:
             detection.corners = detection.corners - np.array(
                 [padding, padding], dtype=np.float32)

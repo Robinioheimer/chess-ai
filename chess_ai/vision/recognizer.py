@@ -196,7 +196,15 @@ class PieceRecognizer:
             LOGGER.debug("Template match weak (%.2f), using heuristic fallback", score)
 
         piece_type = classify_heuristic(features)
-        return chess.Piece(piece_type, color), 0.62, features
+        # Boost confidence for clearly occupied squares with distinct shapes.
+        confidence = 0.62
+        if features.occupancy_ratio > 0.25:
+            confidence = 0.72
+        if features.symmetry < 0.85 and features.top_offset > 0.10:
+            confidence = 0.78  # likely knight
+        elif features.h_ratio >= 0.88 and features.symmetry > 0.88:
+            confidence = 0.75  # likely king/queen
+        return chess.Piece(piece_type, color), confidence, features
 
     def classify_template(self, features: CellFeatures,
                           color: chess.Color) -> tuple[str | None, float]:
