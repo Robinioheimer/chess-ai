@@ -335,7 +335,7 @@ class CorrectionDialog(QtWidgets.QDialog):
         side_row.addWidget(self.side_combo)
 
         self.learn_check = QtWidgets.QCheckBox("Learn piece templates from this correction")
-        self.learn_check.setChecked(True)
+        self.learn_check.setChecked(False)
         self.learn_check.setToolTip(
             "Update piece recognition templates from the corrected squares so "
             "the recognizer remembers these piece shapes on subsequent moves."
