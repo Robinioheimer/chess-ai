@@ -244,7 +244,9 @@ def test_stale_analysis_for_different_fen_is_not_drawn(qapp):
         perspective_white=True, detection=detection,
     )
     stale = _analysis_result()
-    stale.fen = chess.Board().fen()  # FEN differs in castling/en-passant metadata.
+    old_board = chess.Board()
+    old_board.push_san("e4")
+    stale.fen = old_board.fen()  # Result belongs to a different position.
     window.update_recognition(recognition)
     window.update_analysis(stale)
     assert window.marker_view._markers == []
