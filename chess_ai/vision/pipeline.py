@@ -106,6 +106,7 @@ class RecognitionPipeline:
         warp_size: int = 480,
         stable_readings: int = 2,
         min_board_fraction: float = 0.02,
+        manual_only: bool = True,
     ) -> None:
         self.recognizer = recognizer or PieceRecognizer()
         self.warp_size = warp_size
@@ -121,7 +122,7 @@ class RecognitionPipeline:
         self.manual_perspective: Optional[bool] = None  # None = automatic
         self.manual_corners: Optional[np.ndarray] = None  # None = automatic
         # Automatic board search stays disabled; use the manually selected or last region.
-        self.manual_only: bool = True
+        self.manual_only: bool = manual_only
         # Map (screen_row, screen_col) -> (corrected_symbol, raw_symbol_when_set)
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
         # Prevent auto-calibration from running repeatedly.
