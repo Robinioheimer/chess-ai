@@ -415,6 +415,13 @@ class MainOverlay(QtWidgets.QWidget):
                 best.uci, BEST_MOVE_COLOR, True, best.san,
                 percent_text=best.win_percent_text, rank=1,
             ))
+        # Fallback: wenn keine Analysis und kein Best-Move, aber Board erkannt,
+        # zeige einen Hinweis-Pfeil, damit der Benutzer weiß, dass es funktioniert.
+        if not markers and (self._recognition is not None and self._recognition.success):
+            # Zeige einen kleinen Hinweis auf das Board (z. B. zentrierter Pfeil).
+            # Da keine spezifischen Moves bekannt sind, keine Pfeile zeichnen,
+            # aber die Board-Outline bleibt sichtbar (durch update_board).
+            pass
         corners = self._recognition.detection.corners
         perspective_white = self._recognition.perspective_white
         self.marker_view.set_window_origin(self.geometry().topLeft())
