@@ -2,7 +2,7 @@
 import chess
 import numpy as np
 
-from chess_ai.core.fen_utils import board_to_grid
+from chess_ai.core.fen_utils import board_grid_to_screen_grid, board_to_grid
 from chess_ai.vision.pipeline import RecognitionPipeline, infer_perspective
 from chess_ai.vision.synthetic import render_board, render_scene
 
@@ -275,3 +275,39 @@ def test_manual_correction_state_ignores_piece_type_classifier_flicker():
     assert not same_state("p", "P")
     assert not same_state(None, "P")
     assert not same_state("N", None)
+
+
+
+def test_manual_override_survives_single_frame_occupancy_noise():
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
+    baseline = board_grid_to_screen_grid(board_to_grid(chess.Board()), True)
+    pipeline._last_grid = [row[:] for row in baseline]
+    pipeline._square_overrides[(1, 4)] = ("N", baseline[1][4])
+    pipeline._last_raw_grid = [row[:] for row in baseline]
+    pipeline._override_mismatch_counts = {}
+
+    # A one-frame empty-square misread must not release the manual correction.
+    noisy = [row[:] for row in baseline]
+    noisy[1][4] = None
+    assert not pipeline._same_square_state(noisy[1][4], baseline[1][4])
+    state = None if noisy[1][4] is None else ("W" if noisy[1][4].isupper() else "B")
+    pipeline._override_mismatch_counts[(1, 4)] = (state, 1)
+    assert (1, 4) in pipeline._square_overrides
+
+
+def test_many_square_classifier_noise_keeps_last_accepted_position():
+    from chess_ai.vision.features import CellFeatures
+
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
+    previous = board_grid_to_screen_grid(board_to_grid(chess.Board()), True)
+    pipeline._last_grid = [row[:] for row in previous]
+    noisy = [row[:] for row in previous]
+    # Add enough false occupancy changes that no legal single move can explain them.
+    for row, col in ((2, 0), (2, 1), (2, 2), (3, 0), (3, 1)):
+        noisy[row][col] = "p"
+    confidence = [[0.4] * 8 for _ in range(8)]
+    features = [[CellFeatures(occupied=False) for _ in range(8)] for _ in range(8)]
+
+    pipeline._apply_move_continuity(noisy, confidence, features)
+
+    assert noisy == previous

@@ -125,6 +125,9 @@ class RecognitionPipeline:
         self.manual_only: bool = manual_only
         # Map (screen_row, screen_col) -> (corrected_symbol, raw_symbol_when_set)
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
+        # A correction is released only after the same occupancy/colour change
+        # has appeared in several consecutive frames, never after one noisy frame.
+        self._override_mismatch_counts: dict[tuple[int, int], tuple[Optional[str], int]] = {}
         # Prevent auto-calibration from running repeatedly.
         # Interne Figur-Tracking: Koordinaten der erkannten Figuren.
         self._calibration_attempted: bool = False
@@ -260,10 +263,12 @@ class RecognitionPipeline:
                 for col in range(8):
                     raw_sym = raw_base[row][col]
                     corr_sym = clean_grid[row][col]
+                    key = (row, col)
+                    self._override_mismatch_counts.pop(key, None)
                     if corr_sym != raw_sym:
-                        self._square_overrides[(row, col)] = (corr_sym, raw_sym)
+                        self._square_overrides[key] = (corr_sym, raw_sym)
                     else:
-                        self._square_overrides.pop((row, col), None)
+                        self._square_overrides.pop(key, None)
         self._last_grid = clean_grid
         self._candidate_grid = None
         self._candidate_count = 0
@@ -279,6 +284,7 @@ class RecognitionPipeline:
 
     def clear_manual_corrections(self) -> None:
         self._square_overrides.clear()
+        self._override_mismatch_counts.clear()
 
     def reset_stability(self) -> None:
         self._last_grid = None
@@ -287,6 +293,7 @@ class RecognitionPipeline:
         self._candidate_count = 0
         self._last_detection = None
         self._square_overrides.clear()
+        self._override_mismatch_counts.clear()
         # Allow a fresh calibration attempt after a full reset.
         self._calibration_attempted = False
 
@@ -566,6 +573,14 @@ class RecognitionPipeline:
             return
 
         if len(diffs) > 4:
+            # A real single move can change at most four squares (castling).
+            # Larger changes are overwhelmingly caused by a bad frame/crop or
+            # unstable piece masks. Keep the last accepted position instead of
+            # publishing a board full of fresh guesses.
+            for r in range(8):
+                for c in range(8):
+                    grid[r][c] = self._last_grid[r][c]
+                    confidences[r][c] = max(confidences[r][c], 0.80)
             return
 
         persp_white = (
@@ -800,18 +815,33 @@ class RecognitionPipeline:
         self._enforce_chess_constraints(grid, confidences, features_grid)
         self._last_raw_grid = [[cell for cell in row] for row in grid]
 
-        # Apply user corrections until the square's occupancy or piece colour
-        # changes. Exact piece-type matches are too fragile: the classifier can
-        # alternate between e.g. a pawn and a knight on consecutive frames,
-        # which used to erase the correction and make arrows flicker.
+        # Keep manual corrections while the classifier is noisy. A single bad
+        # frame must never release a square: that caused the board to flicker
+        # between the user's correction and the heuristic's guess. Release only
+        # after the same occupancy/colour change is stable for 3 consecutive
+        # frames, which still allows real moves to update the board live.
         if self._square_overrides:
             for (row, col), (corrected_sym, raw_sym) in list(self._square_overrides.items()):
+                key = (row, col)
                 current_sym = grid[row][col]
                 if self._same_square_state(current_sym, raw_sym):
+                    self._override_mismatch_counts.pop(key, None)
                     grid[row][col] = corrected_sym
                     confidences[row][col] = 0.99
+                    continue
+
+                # Track occupancy/colour only, not piece type. The latter is
+                # precisely what the weak shape classifier tends to mislabel.
+                state = None if current_sym is None else ("W" if current_sym.isupper() else "B")
+                previous = self._override_mismatch_counts.get(key)
+                count = previous[1] + 1 if previous is not None and previous[0] == state else 1
+                self._override_mismatch_counts[key] = (state, count)
+                if count >= 3:
+                    self._square_overrides.pop(key, None)
+                    self._override_mismatch_counts.pop(key, None)
                 else:
-                    self._square_overrides.pop((row, col), None)
+                    grid[row][col] = corrected_sym
+                    confidences[row][col] = 0.99
             self._enforce_chess_constraints(grid, confidences, features_grid)
 
         return grid, confidences
