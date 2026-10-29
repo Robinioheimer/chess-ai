@@ -287,7 +287,17 @@ class AppController:
             self.watcher.trigger_now()
             self.bridge.status_message.emit("Automatic full-screen board detection enabled.")
         elif selector.selected_corners is not None:
-            self.pipeline.set_manual_corners(selector.selected_corners)
+            # The selector returns Qt logical coordinates; mss frames use
+            # captured pixels. Convert the selected region before recognition.
+            corners = selector.selected_corners.copy()
+            frame = self.capture.grab()
+            virtual = QtWidgets.QApplication.desktop().virtualGeometry()
+            if virtual.width() > 0 and virtual.height() > 0:
+                scale_x = frame.shape[1] / float(virtual.width())
+                scale_y = frame.shape[0] / float(virtual.height())
+                corners[:, 0] = (corners[:, 0] - virtual.x()) * scale_x
+                corners[:, 1] = (corners[:, 1] - virtual.y()) * scale_y
+            self.pipeline.set_manual_corners(corners)
             self.window.clear_error()
             self.watcher.trigger_now()
             self.bridge.status_message.emit("Board area locked to selected region.")
@@ -375,6 +385,7 @@ class AppController:
                     perspective_white=new_persp,
                     detection=latest.detection if latest else self.pipeline.last_detection,
                     mean_confidence=1.0,
+                    frame_size=self.pipeline.last_frame_size,
                 )
                 self.window.update_recognition(updated_rec)
                 if self.analyzer is not None:
