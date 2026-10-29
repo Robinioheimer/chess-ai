@@ -38,7 +38,7 @@ def check_vision() -> tuple[bool, str]:
         from .vision.synthetic import render_board
 
         frame = render_board(board_to_grid(chess.Board()), square_px=60)
-        pipeline = RecognitionPipeline(stable_readings=1)
+        pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
         result = pipeline.process_frame(frame)
         if not result.success:
             return False, result.error or "recognition failed"
