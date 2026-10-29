@@ -758,6 +758,12 @@ class RecognitionPipeline:
                         grid[row][col] = chess.Piece(piece_type, color).symbol()
                         confidences[row][col] = max(confidences[row][col], 0.55)
 
+        # Interne Figur-Tracking: Speichere das aktuelle Grid für Kontinuität.
+        # Das ermöglicht, dass die Pipeline die Figuren intern verfolgt,
+        # ohne externe Abhängigkeiten (nur innerhalb des Pipeline-Zustands).
+        # Die _last_grid und _candidate_grid dienen als interner Speicher.
+        self._last_grid = [[cell for cell in row] for row in grid]
+
         # If an early opening layout (1-4 moves played) is visible and the
         # recognizer is not yet calibrated, learn templates from the unmoved
         # home squares and re-classify the moved pieces in rows 2..5.

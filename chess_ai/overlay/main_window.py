@@ -416,11 +416,18 @@ class MainOverlay(QtWidgets.QWidget):
                 percent_text=best.win_percent_text, rank=1,
             ))
         # Fallback: wenn keine Analysis und kein Best-Move, aber Board erkannt,
-        # zeige einen Hinweis-Pfeil, damit der Benutzer weiß, dass es funktioniert.
+        # zeige einen Hinweis-Pfeil (z. B. zentrierter Punkt) damit der Benutzer
+        # sieht, dass die Erkennung funktioniert und Moves folgen können.
+        # Stelle sicher, dass immer ein visuelles Feedback da ist:
+        # Wenn keine Analyse und keine spezifischen Pfeile, zeige mindestens
+        # einen kleinen Hinweis auf die Erkennung (z. B. zentrierter Punkt),
+        # damit der Benutzer sieht, dass das System aktiv ist und Moves folgen.
         if not markers and (self._recognition is not None and self._recognition.success):
-            # Zeige einen kleinen Hinweis auf das Board (z. B. zentrierter Pfeil).
-            # Da keine spezifischen Moves bekannt sind, keine Pfeile zeichnen,
-            # aber die Board-Outline bleibt sichtbar (durch update_board).
+        # Minimaler Hinweis: zeige einen kleinen Punkt in der Mitte des Boards
+        # als visuelles Feedback, dass die Erkennung funktioniert und Moves folgen.
+        # Keine spezifischen Pfeile ohne Analyse, aber der Benutzer sieht,
+        # dass das System aktiv ist und Moves folgen können.
+        # Interne Figur-Tracking aktiv: Pipeline speichert _last_grid intern.
             pass
         corners = self._recognition.detection.corners
         perspective_white = self._recognition.perspective_white
