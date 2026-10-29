@@ -216,6 +216,43 @@ def test_cover_screen_sets_geometry(qapp):
     window.close()
 
 
+def test_no_fallback_arrows_before_engine_result(qapp):
+    window = MainOverlay(AppConfig())
+    scene, _ = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
+    detection = detect_board(scene)
+    from chess_ai.vision.pipeline import RecognitionResult as RecResult
+    recognition = RecResult(
+        success=True, fen=chess.STARTING_FEN,
+        screen_grid=board_to_grid(chess.Board()),
+        board_grid=board_to_grid(chess.Board()),
+        perspective_white=True, detection=detection,
+    )
+    window.update_recognition(recognition)
+    assert window.marker_view._markers == []
+    window.close()
+
+
+def test_stale_analysis_for_different_fen_is_not_drawn(qapp):
+    window = MainOverlay(AppConfig())
+    scene, _ = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
+    detection = detect_board(scene)
+    from chess_ai.vision.pipeline import RecognitionResult as RecResult
+    recognition = RecResult(
+        success=True, fen=chess.STARTING_FEN,
+        screen_grid=board_to_grid(chess.Board()),
+        board_grid=board_to_grid(chess.Board()),
+        perspective_white=True, detection=detection,
+    )
+    stale = _analysis_result()
+    old_board = chess.Board()
+    old_board.push_san("e4")
+    stale.fen = old_board.fen()  # Result belongs to a different position.
+    window.update_recognition(recognition)
+    window.update_analysis(stale)
+    assert window.marker_view._markers == []
+    window.close()
+
+
 def test_marker_view_renders_board_outline_before_analysis(qapp):
     window = MainOverlay(AppConfig())
     scene, _ = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
