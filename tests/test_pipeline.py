@@ -282,14 +282,14 @@ def test_manual_override_survives_single_frame_occupancy_noise():
     pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     baseline = board_grid_to_screen_grid(board_to_grid(chess.Board()), True)
     pipeline._last_grid = [row[:] for row in baseline]
-    pipeline._square_overrides[(1, 4)] = ("P", "p")
+    pipeline._square_overrides[(1, 4)] = ("N", baseline[1][4])
     pipeline._last_raw_grid = [row[:] for row in baseline]
     pipeline._override_mismatch_counts = {}
 
     # A one-frame empty-square misread must not release the manual correction.
     noisy = [row[:] for row in baseline]
     noisy[1][4] = None
-    assert not pipeline._same_square_state(noisy[1][4], "p")
+    assert not pipeline._same_square_state(noisy[1][4], baseline[1][4])
     state = None if noisy[1][4] is None else ("W" if noisy[1][4].isupper() else "B")
     pipeline._override_mismatch_counts[(1, 4)] = (state, 1)
     assert (1, 4) in pipeline._square_overrides
