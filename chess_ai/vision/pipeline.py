@@ -122,6 +122,7 @@ class RecognitionPipeline:
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
         # Prevent auto-calibration from running repeatedly.
         self._calibration_attempted: bool = False
+        self._previous_stable_detection: Optional[BoardDetection] = None
 
     # ----------------------------------------------------------- detection
     def _pad_frame(self, frame: np.ndarray) -> tuple[np.ndarray, int]:
@@ -264,6 +265,15 @@ class RecognitionPipeline:
     def process_frame(self, frame: np.ndarray) -> RecognitionResult:
         """Detect and recognize a board in one screenshot."""
         detection, padded, padding = self._detect(frame)
+        # Stability: avoid sudden board region jumps.
+        prev_det = getattr(self, '_previous_stable_detection', None)
+        if detection is not None and prev_det is not None:
+            jump = float(np.linalg.norm(detection.corners - prev_det.corners, axis=1).mean())
+            if jump > 60:
+                LOGGER.info("Board jump %.0f px; using previous stable detection", jump)
+                detection = prev_det
+        if detection is not None:
+            self._previous_stable_detection = detection
         if detection is None:
             return RecognitionResult(False, error="No chessboard detected on screen.")
 
