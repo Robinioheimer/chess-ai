@@ -464,7 +464,7 @@ class MainOverlay(QtWidgets.QWidget):
         corners = self._recognition.detection.corners
         perspective_white = self._recognition.perspective_white
         desktop = QtWidgets.QApplication.desktop()
-        virtual = desktop.virtualGeometry()
+        virtual = desktop.screenGeometry(-1)
         qt_corners = _capture_corners_to_qt(
             corners, self._recognition.frame_size, virtual
         )
