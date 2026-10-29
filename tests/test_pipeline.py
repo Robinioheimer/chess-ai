@@ -249,3 +249,11 @@ def test_frame_recognition_does_not_overwrite_last_accepted_grid():
     accepted = pipeline.process_stable(moved_frame)
     assert accepted.success
     assert chess.Board(accepted.fen).board_fen() == moved.board_fen()
+
+def test_auto_calibration_retries_after_non_opening_position():
+    pipeline = RecognitionPipeline(stable_readings=1)
+    empty_grid = [[None] * 8 for _ in range(8)]
+    cells = np.empty((8, 8), dtype=object)
+
+    assert pipeline._try_auto_calibrate_opening(empty_grid, cells, 110.0) is None
+    assert pipeline._calibration_attempted is False
