@@ -387,14 +387,6 @@ class MainOverlay(QtWidgets.QWidget):
             self.screen_marker_view.hide()
             return
         markers: list[MarkerSpec] = []
-        # Pfeile bleiben sichtbar auch wenn Board leicht verschoben.
-        markers: list[MarkerSpec] = []
-        # Wenn Erkennung erfolgreich ist, aber Board leicht verschoben,
-        # behalte vorherige Marker bei (falls Analyse noch nicht neu da).
-        if (self._recognition is not None and self._recognition.success
-                and self._recognition.detection is not None):
-            # Immer neu zeichnen, damit Pfeile nicht verschwinden.
-            pass
         # Show analysis moves when available.
         if self._analysis is not None and self._analysis.moves:
             colors = self.config.overlay.candidate_colors
