@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import queue
+from collections import deque
 import shutil
 import subprocess
 import threading
@@ -109,6 +110,7 @@ class UciEngine:
         self.options: dict[str, str] = {}
         self.supported_options: dict[str, dict] = {}
         self._searching: bool = False
+        self._recent_output: "deque[str]" = deque(maxlen=20)
 
     # ------------------------------------------------------------ lifecycle
     def start(self) -> None:
@@ -147,6 +149,7 @@ class UciEngine:
             self._reader = threading.Thread(
                 target=self._read_loop, name="uci-reader", daemon=True
             )
+            self._recent_output.clear()
             self._reader.start()
             self._handshake()
 
@@ -165,7 +168,9 @@ class UciEngine:
         assert self._process is not None and self._process.stdout is not None
         try:
             for line in self._process.stdout:
-                self._lines.put(line.rstrip("\r\n"))
+                clean_line = line.rstrip("\r\n")
+                self._recent_output.append(clean_line)
+                self._lines.put(clean_line)
         except (ValueError, OSError) as exc:
             LOGGER.debug("Engine reader stopped: %s", exc)
 
@@ -358,7 +363,12 @@ class UciEngine:
                         line = self._lines.get(timeout=0.05)
                     except queue.Empty:
                         if self._process and self._process.poll() is not None:
-                            raise UciEngineError("Engine process exited during search.")
+                            exit_code = self._process.returncode
+                            recent = " | ".join(self._recent_output)
+                            raise UciEngineError(
+                                f"Engine process exited during search (exit code {exit_code}). "
+                                f"Last engine output: {recent or '<none>'}"
+                            )
                         continue
                     if line.startswith("info"):
                         info = parse_info_line(line)
