@@ -11,6 +11,7 @@ a size grip, without touching the underlying application.
 """
 from __future__ import annotations
 
+import chess
 from PyQt5 import QtCore, QtWidgets
 
 from ..config import AppConfig
@@ -422,13 +423,27 @@ class MainOverlay(QtWidgets.QWidget):
         # Wenn keine Analyse und keine spezifischen Pfeile, zeige mindestens
         # einen kleinen Hinweis auf die Erkennung (z. B. zentrierter Punkt),
         # damit der Benutzer sieht, dass das System aktiv ist und Moves folgen.
-        if not markers and (self._recognition is not None and self._recognition.success):
-        # Minimaler Hinweis: zeige einen kleinen Punkt in der Mitte des Boards
-        # als visuelles Feedback, dass die Erkennung funktioniert und Moves folgen.
-        # Keine spezifischen Pfeile ohne Analyse, aber der Benutzer sieht,
-        # dass das System aktiv ist und Moves folgen können.
-        # Interne Figur-Tracking aktiv: Pipeline speichert _last_grid intern.
-            pass
+        if not markers and self._recognition is not None and self._recognition.success:
+            # Engine startup/search can fail or take a moment. Still show legal
+            # moves for the recognized position instead of leaving the board
+            # without arrows. These are available moves, not engine rankings.
+            try:
+                board = chess.Board(self._recognition.fen) if self._recognition.fen else None
+                if board is not None and board.is_valid():
+                    legal_moves = list(board.legal_moves)
+                    colors = self.config.overlay.candidate_colors or ["#E8862C"]
+                    for index, move in enumerate(legal_moves):
+                        uci = move.uci()
+                        if uci in self._hidden_uci:
+                            continue
+                        markers.append(MarkerSpec(
+                            uci, colors[index % len(colors)], False,
+                            board.san(move), rank=index + 1,
+                        ))
+            except (ValueError, TypeError):
+                # Invalid/unavailable FEN: keep the board outline but do not
+                # invent arrows for a position we cannot validate.
+                pass
         corners = self._recognition.detection.corners
         perspective_white = self._recognition.perspective_white
         self.marker_view.set_window_origin(self.geometry().topLeft())

@@ -87,15 +87,11 @@ class AnalysisManager:
 
     # -------------------------------------------------------------- control
     def request_analysis(self, fen: str) -> None:
-        """Request analysis of a position (replaces any pending request).
-
-        An in-flight search for a stale position is interrupted immediately
-        so the newest board position is analyzed without waiting for the
-        previous depth target.
-        """
+        """Request analysis and interrupt the active search without a lost wakeup."""
         with self._job_lock:
             self._pending_fen = fen
-        self._stop_event.set()
+            active_stop = self._stop_event
+            active_stop.set()
         self._wake.set()
 
     def reanalyze(self) -> None:
@@ -111,9 +107,10 @@ class AnalysisManager:
         LOGGER.info("Analysis paused")
 
     def resume(self) -> None:
-        self._paused = False
-        # Recreate the stop event so future searches can be interrupted again.
-        self._stop_event = threading.Event()
+        with self._job_lock:
+            self._paused = False
+            # Recreate the stop event so future searches can be interrupted again.
+            self._stop_event = threading.Event()
         self._wake.set()
         LOGGER.info("Analysis resumed")
         self.reanalyze()
@@ -140,10 +137,15 @@ class AnalysisManager:
             with self._job_lock:
                 fen = self._pending_fen
                 self._pending_fen = None
+                if fen:
+                    # Publish the event atomically with taking the job. If a new
+                    # request arrives now, it will interrupt this exact search.
+                    stop = threading.Event()
+                    self._stop_event = stop
             if not fen:
                 continue
             try:
-                self._analyze(fen)
+                self._analyze(fen, stop)
             except UciEngineError as exc:
                 LOGGER.exception("Engine communication failure")
                 self.on_result(AnalysisResult(
@@ -157,12 +159,8 @@ class AnalysisManager:
     def _is_shutdown(self) -> bool:
         return self._shutdown_flag
 
-    def _analyze(self, fen: str) -> None:
+    def _analyze(self, fen: str, stop: threading.Event) -> None:
         self._current_fen = fen
-        # Fresh interrupt event for this search; request_analysis/pause can
-        # set it to stop the search without affecting later jobs.
-        stop = threading.Event()
-        self._stop_event = stop
         board = chess.Board(fen)
         multipv = self._effective_multipv(board)
         latest: dict[int, UciInfo] = {}
