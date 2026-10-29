@@ -118,6 +118,8 @@ class RecognitionPipeline:
         self._last_detection: Optional[BoardDetection] = None
         self.manual_perspective: Optional[bool] = None  # None = automatic
         self.manual_corners: Optional[np.ndarray] = None  # None = automatic
+        # Wenn True: nur manuelle Ecken nutzen, keine automatische Suche.
+        self.manual_only: bool = False
         # Map (screen_row, screen_col) -> (corrected_symbol, raw_symbol_when_set)
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
         # Prevent auto-calibration from running repeatedly.
@@ -150,14 +152,28 @@ class RecognitionPipeline:
     def _detect(self, frame: np.ndarray) -> tuple[Optional[BoardDetection], np.ndarray, int]:
         """Return detection (in original-frame coordinates), padded frame, padding."""
         padded, padding = self._pad_frame(frame)
-        if self.manual_corners is not None:
-            corners = order_points(self.manual_corners.copy())
-            height, width = frame.shape[:2]
-            corners[:, 0] = np.clip(corners[:, 0], 0, width - 1)
-            corners[:, 1] = np.clip(corners[:, 1], 0, height - 1)
-            detection = BoardDetection(corners, quad_area(corners), 1.0, "manual")
-            self._last_detection = detection
-            return detection, padded, padding
+        if self.manual_corners is not None or self.manual_only:
+            if self.manual_corners is None:
+                # Keine manuelle Region gesetzt und manual_only aktiv:
+                # Verwende letzte stabile Detection statt automatischer Suche.
+                if self._previous_stable_detection is not None:
+                    corners = self._previous_stable_detection.corners.copy()
+                    height, width = frame.shape[:2]
+                    corners[:, 0] = np.clip(corners[:, 0], 0, width - 1)
+                    corners[:, 1] = np.clip(corners[:, 1], 0, height - 1)
+                    detection = BoardDetection(corners, quad_area(corners), 1.0, "manual-stable")
+                    self._last_detection = detection
+                    return detection, padded, padding
+                else:
+                    return None, padded, padding
+            else:
+                corners = order_points(self.manual_corners.copy())
+                height, width = frame.shape[:2]
+                corners[:, 0] = np.clip(corners[:, 0], 0, width - 1)
+                corners[:, 1] = np.clip(corners[:, 1], 0, height - 1)
+                detection = BoardDetection(corners, quad_area(corners), 1.0, "manual")
+                self._last_detection = detection
+                return detection, padded, padding
 
         detection = detect_board(padded, min_fraction=self.min_board_fraction)
         # If a previous detection exists and the new one jumps too far,
