@@ -756,6 +756,11 @@ class RecognitionPipeline:
         opening_cal = self._try_auto_calibrate_opening(grid, cells, threshold)
         if opening_cal is not None:
             grid, confidences = opening_cal
+            # Nach Kalibrierung: Stable-Detection aktualisieren, damit Pfeile bleiben.
+            self._last_grid = [[cell for cell in row] for row in grid]
+            # Behalte vorherige Detection bei, damit Board nicht verrutscht und Pfeile bleiben.
+            if hasattr(self, '_previous_stable_detection') and self._previous_stable_detection is not None:
+                pass  # Vorherige behalten
 
         # Apply legal move-transition continuity from the previous accepted state.
         self._apply_move_continuity(grid, confidences, features_grid)
