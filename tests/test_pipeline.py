@@ -2,7 +2,7 @@
 import chess
 import numpy as np
 
-from chess_ai.core.fen_utils import board_to_grid
+from chess_ai.core.fen_utils import board_grid_to_screen_grid, board_to_grid
 from chess_ai.vision.pipeline import RecognitionPipeline, infer_perspective
 from chess_ai.vision.synthetic import render_board, render_scene
 
