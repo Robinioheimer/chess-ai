@@ -17,7 +17,7 @@ def _grid_after_moves(moves: list[str]):
 def test_starting_position_full_recognition():
     grid = board_to_grid(chess.Board())
     frame = render_board(grid, square_px=60)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     result = pipeline.process_frame(frame)
     assert result.success
     assert result.perspective_white is True
@@ -29,7 +29,7 @@ def test_starting_position_full_recognition():
 def test_midgame_position_full_recognition():
     grid, original = _grid_after_moves(["e4", "e5", "Nf3", "Nc6", "Bb5", "a6"])
     frame = render_board(grid, square_px=60)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     result = pipeline.process_frame(frame)
     assert result.success
     recognized = chess.Board(result.fen)
@@ -39,7 +39,7 @@ def test_midgame_position_full_recognition():
 def test_black_perspective_board():
     grid = board_to_grid(chess.Board())
     frame = render_board(grid, square_px=60, perspective_white=False)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     pipeline.set_manual_perspective(False)
     result = pipeline.process_frame(frame)
     assert result.success
@@ -50,7 +50,7 @@ def test_black_perspective_board():
 
 def test_no_board_reports_clear_error():
     frame = np.full((400, 400, 3), (15, 15, 15), dtype=np.uint8)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     result = pipeline.process_frame(frame)
     assert not result.success
     assert "No chessboard" in result.error
@@ -59,7 +59,7 @@ def test_no_board_reports_clear_error():
 def test_stability_filter_requires_repeated_readings():
     grid = board_to_grid(chess.Board())
     frame = render_board(grid, square_px=60)
-    pipeline = RecognitionPipeline(stable_readings=2)
+    pipeline = RecognitionPipeline(stable_readings=2, manual_only=False)
 
     first = pipeline.process_stable(frame)
     assert first.success  # first reading is accepted immediately
@@ -81,7 +81,7 @@ def test_stability_filter_requires_repeated_readings():
 def test_duplicate_frames_keep_same_fen():
     grid = board_to_grid(chess.Board())
     frame = render_board(grid, square_px=60)
-    pipeline = RecognitionPipeline(stable_readings=2)
+    pipeline = RecognitionPipeline(stable_readings=2, manual_only=False)
     pipeline.process_stable(frame)
     again = pipeline.process_stable(frame)
     assert again.success
@@ -91,7 +91,7 @@ def test_duplicate_frames_keep_same_fen():
 def test_pipeline_detects_board_inside_scene():
     grid = board_to_grid(chess.Board())
     scene, _ = render_scene(grid, square_px=56, padding=60)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     result = pipeline.process_frame(scene)
     assert result.success
     assert result.detection is not None
@@ -106,7 +106,7 @@ def test_infer_perspective_starting_position():
 def test_infer_perspective_manual_override():
     grid = board_to_grid(chess.Board())
     frame = render_board(grid, square_px=60, perspective_white=False)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     pipeline.set_manual_perspective(False)
     result = pipeline.process_frame(frame)
     assert result.perspective_white is False
@@ -117,7 +117,7 @@ def test_infer_perspective_manual_override():
 def test_calibration_from_starting_position(tmp_path):
     grid = board_to_grid(chess.Board())
     frame = render_board(grid, square_px=64)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     count = pipeline.calibrate_from_starting_position(frame)
     assert count == 32
     assert pipeline.recognizer.calibrated
@@ -126,7 +126,7 @@ def test_calibration_from_starting_position(tmp_path):
 def test_auto_infer_black_perspective_without_manual_override():
     grid, original = _grid_after_moves(["e4", "c5", "Nf3", "d6"])
     frame = render_board(grid, square_px=60, perspective_white=False)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     result = pipeline.process_frame(frame)
     assert result.success
     assert result.perspective_white is False
@@ -136,7 +136,7 @@ def test_auto_infer_black_perspective_without_manual_override():
 def test_chess_constraints_repair_back_rank_pawns_and_missing_kings():
     from chess_ai.vision.features import CellFeatures
 
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     grid = [[None] * 8 for _ in range(8)]
     # Back-rank pawn on row 0 col 0, two queens and zero kings
     grid[0][0] = "p"
@@ -165,7 +165,7 @@ def test_manual_correction_persists_until_square_changes():
 
     grid = board_to_grid(chess.Board())
     frame = render_board(grid, square_px=60)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     initial = pipeline.process_stable(frame)
     assert initial.success
 
@@ -182,7 +182,7 @@ def test_manual_correction_persists_until_square_changes():
 
 def test_manual_corners_lock_and_clear():
     scene, truth = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     pipeline.set_manual_corners(truth)
     result = pipeline.process_frame(scene)
     assert result.success
@@ -196,7 +196,7 @@ def test_auto_calibration_on_early_opening_position():
     for san in ("e4", "e5", "Nf3", "Nc6"):
         board.push_san(san)
     scene, _ = render_scene(board_to_grid(board), square_px=60, padding=60)
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     assert not pipeline.recognizer.calibrated
     result = pipeline.process_stable(scene)
     assert result.success
@@ -206,7 +206,7 @@ def test_auto_calibration_on_early_opening_position():
 
 def test_move_continuity_tracks_sequence_of_moves():
     board = chess.Board()
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     for san in ("e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O"):
         board.push_san(san)
         scene, _ = render_scene(board_to_grid(board), square_px=60, padding=60)
@@ -230,7 +230,7 @@ def test_frame_recognition_does_not_overwrite_last_accepted_grid():
     """Move continuity must compare a new frame with the prior accepted position."""
     start_grid = board_to_grid(chess.Board())
     start_frame = render_board(start_grid, square_px=60)
-    pipeline = RecognitionPipeline(stable_readings=2)
+    pipeline = RecognitionPipeline(stable_readings=2, manual_only=False)
     first = pipeline.process_stable(start_frame)
     assert first.success
     accepted_grid = [row[:] for row in pipeline._last_grid]
@@ -251,7 +251,7 @@ def test_frame_recognition_does_not_overwrite_last_accepted_grid():
     assert chess.Board(accepted.fen).board_fen() == moved.board_fen()
 
 def test_auto_calibration_retries_after_non_opening_position():
-    pipeline = RecognitionPipeline(stable_readings=1)
+    pipeline = RecognitionPipeline(stable_readings=1, manual_only=False)
     empty_grid = [[None] * 8 for _ in range(8)]
     cells = np.empty((8, 8), dtype=object)
 
