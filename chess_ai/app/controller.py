@@ -285,7 +285,9 @@ class AppController:
             self.pipeline.clear_manual_corners()
             self.pipeline.reset_stability()
             self.watcher.trigger_now()
-            self.bridge.status_message.emit("Automatic full-screen board detection enabled.")
+            self.bridge.status_message.emit(
+                "Board selection cleared. Select the board manually again; automatic detection stays disabled."
+            )
         elif selector.selected_corners is not None:
             # The selector returns Qt logical coordinates; mss frames use
             # captured pixels. Convert the selected region before recognition.
