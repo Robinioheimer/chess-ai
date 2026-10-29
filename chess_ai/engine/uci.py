@@ -219,16 +219,66 @@ class UciEngine:
             LOGGER.debug("Could not parse option line: %s", line)
 
     # ------------------------------------------------------------- commands
+    def _discard_process(self) -> None:
+        """Dispose of a broken engine process and its pipes before restarting."""
+        process, reader = self._process, self._reader
+        self._process = None
+        self._reader = None
+        self._searching = False
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.kill()
+            except OSError:
+                pass
+            for stream in (process.stdin, process.stdout, process.stderr):
+                try:
+                    if stream is not None:
+                        stream.close()
+                except (OSError, ValueError):
+                    pass
+        if reader is not None and reader.is_alive() and reader is not threading.current_thread():
+            reader.join(timeout=1)
+        # Never let lines from the previous process contaminate a restarted one.
+        while True:
+            try:
+                self._lines.get_nowait()
+            except queue.Empty:
+                break
+
+    def _ensure_started_locked(self) -> None:
+        """Start/restart Stockfish if its process or stdin pipe is no longer usable."""
+        process = self._process
+        stdin = process.stdin if process is not None else None
+        if (
+            process is not None
+            and process.poll() is None
+            and stdin is not None
+            and not getattr(stdin, "closed", False)
+        ):
+            return
+        self._discard_process()
+        self.start()
+        # start() performs the UCI handshake; restore options set by the caller.
+        for name, value in list(self.options.items()):
+            self._send(f"setoption name {name} value {value}")
+
     def _send(self, command: str) -> None:
-        if self._process is None or self._process.stdin is None:
+        process = self._process
+        if process is None or process.stdin is None:
             raise UciEngineError("Engine is not running.")
+        if process.poll() is not None:
+            self._discard_process()
+            raise UciEngineError("Engine process exited before UCI command could be sent.")
         LOGGER.debug("uci> %s", command)
         try:
-            self._process.stdin.write(command + "\n")
-            self._process.stdin.flush()
+            process.stdin.write(command + "\n")
+            process.stdin.flush()
         except (BrokenPipeError, OSError, ValueError) as exc:
+            self._discard_process()
             raise UciEngineError(
-                f"Could not send UCI command {command.split()[0]!r}: {exc}"
+                f"Could not send UCI command {command.split()[0]!r}: {exc}. "
+                "The broken engine process was reset."
             ) from exc
 
     def set_option(self, name: str, value: object) -> None:
@@ -269,7 +319,10 @@ class UciEngine:
         without ever being restarted.
         """
         with self._lock:
+            self._ensure_started_locked()
             self._stop_search_locked()
+            # _stop_search_locked may discard a process whose stdin failed.
+            self._ensure_started_locked()
             if multipv is not None:
                 self.set_option("MultiPV", multipv)
             self._send("position fen " + fen)
@@ -292,8 +345,15 @@ class UciEngine:
                     # UCI stop is a one-shot request. Sending it on every poll
                     # can flood engines while they are finishing the search.
                     if stop_event is not None and stop_event.is_set() and not stop_sent:
-                        self._send("stop")
-                        stop_sent = True
+                        try:
+                            self._send("stop")
+                            stop_sent = True
+                        except UciEngineError:
+                            # This search is stale and its pipe is broken. Let the
+                            # worker restart the engine for the newest position.
+                            LOGGER.warning("Could not interrupt broken UCI process; restarting on next request.")
+                            self._discard_process()
+                            return None
                     try:
                         line = self._lines.get(timeout=0.05)
                     except queue.Empty:
@@ -323,7 +383,13 @@ class UciEngine:
     def _stop_search_locked(self) -> None:
         if self._process is None or not self._searching:
             return
-        self._send("stop")
+        try:
+            self._send("stop")
+        except UciEngineError:
+            # Avoid repeating writes to a dead pipe on every screen update.
+            LOGGER.warning("UCI stop failed; discarding the broken engine process.")
+            self._discard_process()
+            return
         try:
             self._drain_until(lambda line: line.startswith("bestmove"), 2.0)
         except UciEngineError:
