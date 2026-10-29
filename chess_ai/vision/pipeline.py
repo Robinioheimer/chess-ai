@@ -118,8 +118,8 @@ class RecognitionPipeline:
         self._last_detection: Optional[BoardDetection] = None
         self.manual_perspective: Optional[bool] = None  # None = automatic
         self.manual_corners: Optional[np.ndarray] = None  # None = automatic
-        # Automatische Suche deaktiviert: nur manuelle/letzte Region nutzen.
-        self.manual_only: bool = False
+        # Automatic board search stays disabled; use the manually selected or last region.
+        self.manual_only: bool = True
         # Map (screen_row, screen_col) -> (corrected_symbol, raw_symbol_when_set)
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
         # Prevent auto-calibration from running repeatedly.
