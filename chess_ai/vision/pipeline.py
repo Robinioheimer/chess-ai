@@ -453,7 +453,6 @@ class RecognitionPipeline:
         """
         if self.recognizer.calibrated or self._calibration_attempted:
             return None
-        self._calibration_attempted = True
         top_white = sum(1 for r in (0, 1) for c in range(8) if grid[r][c] and grid[r][c].isupper())
         top_black = sum(1 for r in (0, 1) for c in range(8) if grid[r][c] and grid[r][c].islower())
         bot_white = sum(1 for r in (6, 7) for c in range(8) if grid[r][c] and grid[r][c].isupper())
@@ -478,6 +477,10 @@ class RecognitionPipeline:
         if self.manual_perspective is not None and self.manual_perspective != persp_white:
             return None
 
+        # Do not permanently disable calibration just because an earlier frame
+        # was a midgame, incomplete, or misclassified position. Mark it attempted
+        # only after the board really matches the opening-position constraints.
+        self._calibration_attempted = True
         expected = self._starting_screen_grid(persp_white)
         home_symbols: Grid = [[None] * 8 for _ in range(8)]
         for r in (0, 1, 6, 7):
