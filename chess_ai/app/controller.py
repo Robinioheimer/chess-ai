@@ -294,7 +294,7 @@ class AppController:
             # captured pixels. Convert the selected region before recognition.
             corners = selector.selected_corners.copy()
             frame = self.capture.grab()
-            virtual = QtWidgets.QApplication.desktop().virtualGeometry()
+            virtual = QtWidgets.QApplication.desktop().screenGeometry(-1)
             if virtual.width() > 0 and virtual.height() > 0:
                 scale_x = frame.shape[1] / float(virtual.width())
                 scale_y = frame.shape[0] / float(virtual.height())
