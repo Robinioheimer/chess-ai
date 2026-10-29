@@ -388,62 +388,52 @@ class MainOverlay(QtWidgets.QWidget):
             self.screen_marker_view.hide()
             return
         markers: list[MarkerSpec] = []
-        # Show analysis moves when available.
-        if self._analysis is not None and self._analysis.moves:
-            colors = self.config.overlay.candidate_colors
-            for index, move in enumerate(self._analysis.moves):
-                if move.uci in self._hidden_uci:
-                    continue
-                if not move.visible:
-                    continue
-                if index == 0:
-                    color = self.config.overlay.marker_color_best or BEST_MOVE_COLOR
-                    markers.append(MarkerSpec(
-                        move.uci, color, True, move.san,
-                        percent_text=move.win_percent_text, rank=index + 1,
-                    ))
-                else:
-                    color = colors[(index - 1) % len(colors)]
-                    markers.append(MarkerSpec(
-                        move.uci, color, False, move.san,
-                        percent_text=move.win_percent_text, rank=index + 1,
-                    ))
-        # Even without analysis, draw at least the best-move arrow if we have
-        # a recognized position and a previous best move is tracked.
-        if not markers and self._analysis is not None and self._analysis.best_move:
-            best = self._analysis.best_move
-            markers.append(MarkerSpec(
-                best.uci, BEST_MOVE_COLOR, True, best.san,
-                percent_text=best.win_percent_text, rank=1,
-            ))
-        # Fallback: wenn keine Analysis und kein Best-Move, aber Board erkannt,
-        # zeige einen Hinweis-Pfeil (z. B. zentrierter Punkt) damit der Benutzer
-        # sieht, dass die Erkennung funktioniert und Moves folgen können.
-        # Stelle sicher, dass immer ein visuelles Feedback da ist:
-        # Wenn keine Analyse und keine spezifischen Pfeile, zeige mindestens
-        # einen kleinen Hinweis auf die Erkennung (z. B. zentrierter Punkt),
-        # damit der Benutzer sieht, dass das System aktiv ist und Moves folgen.
-        if not markers and self._recognition is not None and self._recognition.success:
-            # Engine startup/search can fail or take a moment. Still show legal
-            # moves for the recognized position instead of leaving the board
-            # without arrows. These are available moves, not engine rankings.
+        # Only display ranked engine recommendations for the exact position
+        # currently recognized. A delayed result for an older FEN must never
+        # draw arrows on a newer board.
+        recognized_fen = self._recognition.fen
+        analysis_matches_position = (
+            self._analysis is not None
+            and bool(recognized_fen)
+            and self._analysis.fen == recognized_fen
+        )
+        if analysis_matches_position and self._analysis.moves:
             try:
-                board = chess.Board(self._recognition.fen) if self._recognition.fen else None
-                if board is not None and board.is_valid():
-                    legal_moves = list(board.legal_moves)
-                    colors = self.config.overlay.candidate_colors or ["#E8862C"]
-                    for index, move in enumerate(legal_moves):
-                        uci = move.uci()
-                        if uci in self._hidden_uci:
-                            continue
-                        markers.append(MarkerSpec(
-                            uci, colors[index % len(colors)], False,
-                            board.san(move), rank=index + 1,
-                        ))
+                board = chess.Board(recognized_fen)
+                colors = self.config.overlay.candidate_colors or ["#E8862C"]
+                # MultiPV is already ranked by the engine. Keep the overlay
+                # focused on a few strong candidates instead of every legal move.
+                max_candidates = min(3, max(1, self.config.engine.multipv))
+                shown = 0
+                for move in self._analysis.moves:
+                    if shown >= max_candidates:
+                        break
+                    if move.uci in self._hidden_uci or not move.visible:
+                        continue
+                    try:
+                        parsed_move = chess.Move.from_uci(move.uci)
+                    except ValueError:
+                        continue
+                    if parsed_move not in board.legal_moves:
+                        continue
+                    if shown == 0:
+                        color = self.config.overlay.marker_color_best or BEST_MOVE_COLOR
+                        is_best = True
+                    else:
+                        color = colors[(shown - 1) % len(colors)]
+                        is_best = False
+                    markers.append(MarkerSpec(
+                        move.uci, color, is_best, board.san(parsed_move),
+                        percent_text=move.win_percent_text, rank=shown + 1,
+                    ))
+                    shown += 1
             except (ValueError, TypeError):
-                # Invalid/unavailable FEN: keep the board outline but do not
-                # invent arrows for a position we cannot validate.
-                pass
+                # Do not paint guessed arrows for a malformed position.
+                markers = []
+        # Deliberately do not fall back to drawing every legal move. Until the
+        # engine has a result for this exact FEN, show the board outline only.
+        # This avoids presenting moves from a misrecognized/stale position as
+        # useful recommendations.
         corners = self._recognition.detection.corners
         perspective_white = self._recognition.perspective_white
         self.marker_view.set_window_origin(self.geometry().topLeft())
