@@ -219,16 +219,44 @@ class UciEngine:
             LOGGER.debug("Could not parse option line: %s", line)
 
     # ------------------------------------------------------------- commands
+    def _discard_process(self) -> None:
+        """Forget a broken engine process so the next analysis can restart it."""
+        process = self._process
+        reader = self._reader
+        self._process = None
+        self._reader = None
+        self._searching = False
+        if process is not None:
+            if process.poll() is None:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+            for stream in (process.stdin, process.stdout, process.stderr):
+                try:
+                    if stream is not None:
+                        stream.close()
+                except (OSError, ValueError):
+                    pass
+        if reader is not None and reader.is_alive() and reader is not threading.current_thread():
+            reader.join(timeout=1)
+
     def _send(self, command: str) -> None:
-        if self._process is None or self._process.stdin is None:
+        process = self._process
+        if process is None or process.stdin is None:
             raise UciEngineError("Engine is not running.")
+        if process.poll() is not None:
+            self._discard_process()
+            raise UciEngineError("Engine process exited before UCI command could be sent.")
         LOGGER.debug("uci> %s", command)
         try:
-            self._process.stdin.write(command + "\n")
-            self._process.stdin.flush()
+            process.stdin.write(command + "\n")
+            process.stdin.flush()
         except (BrokenPipeError, OSError, ValueError) as exc:
+            self._discard_process()
             raise UciEngineError(
-                f"Could not send UCI command {command.split()[0]!r}: {exc}"
+                f"Could not send UCI command {command.split()[0]!r}: {exc}. "
+                "The engine process was reset and will be restarted on the next analysis."
             ) from exc
 
     def set_option(self, name: str, value: object) -> None:
@@ -269,6 +297,14 @@ class UciEngine:
         without ever being restarted.
         """
         with self._lock:
+            # A broken stdin pipe invalidates the old process. Recover before
+            # attempting to stop a search or send a position to that process.
+            if self._process is None or self._process.poll() is not None:
+                self._discard_process()
+                self.start()
+                # Restore options configured before the engine exited.
+                for name, value in self.options.items():
+                    self._send(f"setoption name {name} value {value}")
             self._stop_search_locked()
             if multipv is not None:
                 self.set_option("MultiPV", multipv)
