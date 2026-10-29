@@ -1,5 +1,6 @@
 """Headless smoke tests for the PyQt5 overlay components."""
 import chess
+import numpy as np
 import pytest
 
 from tests.gl_stub import ensure_pyqt5
@@ -13,14 +14,16 @@ except Exception:  # pragma: no cover - environment without GUI libs
 pytestmark = pytest.mark.skipif(not PYQT_AVAILABLE,
                                 reason="PyQt5 or a GL library is unavailable")
 
-from PyQt5 import QtWidgets  # noqa: E402
+from PyQt5 import QtCore, QtWidgets  # noqa: E402
 
 from chess_ai.config import AppConfig  # noqa: E402
 from chess_ai.engine.types import AnalysisResult, MoveEvaluation  # noqa: E402
 from chess_ai.overlay.board_marker import MarkerSpec, screen_row_col  # noqa: E402
 from chess_ai.overlay.candidate_panel import CandidatePanel  # noqa: E402
 from chess_ai.overlay.dialogs import CorrectionDialog, FenDialog  # noqa: E402
-from chess_ai.overlay.main_window import MainOverlay  # noqa: E402
+from chess_ai.overlay.main_window import (  # noqa: E402
+    MainOverlay, _capture_corners_to_qt, _same_piece_placement,
+)
 from chess_ai.vision.detect import detect_board  # noqa: E402
 from chess_ai.vision.synthetic import render_scene  # noqa: E402
 from chess_ai.core.fen_utils import board_to_grid  # noqa: E402
@@ -372,4 +375,59 @@ def test_visible_overlay_uses_full_screen_layer_for_move_arrows(qapp):
 
     assert window.screen_marker_view.isVisible()
     assert len(window.screen_marker_view._markers) >= 1
+    window.close()
+
+
+
+def test_position_matching_ignores_unobservable_turn_and_castling():
+    placement = chess.Board().board_fen()
+    visual_fen = f"{placement} w KQkq - 0 1"
+    tracked_fen = f"{placement} b - - 12 7"
+    assert _same_piece_placement(visual_fen, tracked_fen)
+    moved = chess.Board()
+    moved.push_san("e4")
+    assert not _same_piece_placement(visual_fen, moved.fen())
+
+
+def test_capture_coordinates_scale_to_qt_virtual_desktop():
+    corners = np.array([[0, 0], [1600, 1200]], dtype=np.float32)
+    virtual = QtCore.QRect(-100, 20, 800, 600)
+    mapped = _capture_corners_to_qt(corners, (1600, 1200), virtual)
+    assert np.allclose(mapped, [[-100, 20], [700, 620]])
+
+
+def test_arrows_render_when_visual_fen_turn_differs_from_engine_fen(qapp):
+    window = MainOverlay(AppConfig())
+    scene, _ = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
+    detection = detect_board(scene)
+    from chess_ai.vision.pipeline import RecognitionResult as RecResult
+
+    recognition = RecResult(
+        success=True,
+        fen=chess.STARTING_FEN,  # vision cannot reliably determine side to move
+        screen_grid=board_to_grid(chess.Board()),
+        board_grid=board_to_grid(chess.Board()),
+        perspective_white=True,
+        detection=detection,
+    )
+    analysis = _analysis_result()
+    analysis.fen = f"{chess.Board().board_fen()} b - - 0 1"
+    black_board = chess.Board(analysis.fen)
+    moves = []
+    for index, (uci, san, cp) in enumerate([
+        ("e7e5", "e5", 30), ("d7d5", "d5", 20), ("g8f6", "Nf6", 15)
+    ]):
+        moves.append(MoveEvaluation(
+            multipv_index=index + 1, uci=uci, san=san,
+            pv_uci=[uci], pv_san=[san], depth=12, cp=cp, mate=None,
+            win_probability=0.5, opponent_win_probability=0.5,
+            opponent_eval=f"{-cp / 100:+.2f}", nodes=10000, nps=200000,
+            time_ms=50, explanation="Test move",
+        ))
+    analysis.moves = moves
+    window.update_recognition(recognition)
+    window.update_analysis(analysis)
+    assert [marker.uci for marker in window.marker_view._markers] == [
+        "e7e5", "d7d5", "g8f6"
+    ]
     window.close()

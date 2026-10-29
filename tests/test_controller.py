@@ -72,6 +72,9 @@ def test_controller_end_to_end(qapp, monkeypatch, tmp_path):
 
     frame = render_board(board_to_grid(chess.Board()), square_px=60)
     app = controller_module.AppController(config, capture=FakeCapture(frame))
+    # This test exercises automatic detection on synthetic frames; the real app
+    # deliberately keeps manual-only board selection enabled by default.
+    app.pipeline.manual_only = False
     app.start()
     try:
         assert app.analyzer is not None

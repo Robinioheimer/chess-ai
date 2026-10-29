@@ -12,6 +12,7 @@ a size grip, without touching the underlying application.
 from __future__ import annotations
 
 import chess
+import numpy as np
 from PyQt5 import QtCore, QtWidgets
 
 from ..config import AppConfig
@@ -19,6 +20,31 @@ from ..engine.types import AnalysisResult
 from ..vision.pipeline import RecognitionResult
 from .board_marker import BEST_MOVE_COLOR, BoardMarkerView, MarkerSpec
 from .candidate_panel import CandidatePanel
+
+def _same_piece_placement(first_fen: str | None, second_fen: str | None) -> bool:
+    """Compare only visible piece placement; vision cannot infer turn/castling rights."""
+    if not first_fen or not second_fen:
+        return False
+    try:
+        return chess.Board(first_fen).board_fen() == chess.Board(second_fen).board_fen()
+    except (ValueError, TypeError):
+        return False
+
+
+def _capture_corners_to_qt(corners, frame_size, virtual_geometry):
+    """Map screenshot pixel coordinates into Qt's logical virtual-desktop coordinates."""
+    points = np.asarray(corners, dtype=np.float32).copy()
+    if not frame_size or len(frame_size) != 2:
+        return points
+    frame_width, frame_height = frame_size
+    if frame_width <= 0 or frame_height <= 0:
+        return points
+    scale_x = virtual_geometry.width() / float(frame_width)
+    scale_y = virtual_geometry.height() / float(frame_height)
+    points[:, 0] = virtual_geometry.x() + points[:, 0] * scale_x
+    points[:, 1] = virtual_geometry.y() + points[:, 1] * scale_y
+    return points
+
 
 STYLESHEET = """
 QWidget#OverlayRoot {
@@ -394,12 +420,13 @@ class MainOverlay(QtWidgets.QWidget):
         recognized_fen = self._recognition.fen
         analysis_matches_position = (
             self._analysis is not None
-            and bool(recognized_fen)
-            and self._analysis.fen == recognized_fen
+            and _same_piece_placement(recognized_fen, self._analysis.fen)
         )
         if analysis_matches_position and self._analysis.moves:
             try:
-                board = chess.Board(recognized_fen)
+                # Use the engine's turn/castling state for legality. The visual
+                # recognizer only knows piece placement, not whose turn it is.
+                board = chess.Board(self._analysis.fen)
                 colors = self.config.overlay.candidate_colors or ["#E8862C"]
                 # MultiPV is already ranked by the engine. Keep the overlay
                 # focused on a few strong candidates instead of every legal move.
@@ -436,19 +463,21 @@ class MainOverlay(QtWidgets.QWidget):
         # useful recommendations.
         corners = self._recognition.detection.corners
         perspective_white = self._recognition.perspective_white
+        desktop = QtWidgets.QApplication.desktop()
+        virtual = desktop.screenGeometry(-1)
+        qt_corners = _capture_corners_to_qt(
+            corners, self._recognition.frame_size, virtual
+        )
         self.marker_view.set_window_origin(self.geometry().topLeft())
-        self.marker_view.update_board(corners, perspective_white, markers)
+        self.marker_view.update_board(qt_corners, perspective_white, markers)
 
-        # Always render board arrows on the dedicated full-screen transparent
-        # click-through layer. The main window itself covers the screen, so a
-        # "board inside main window" test would otherwise route arrows to a
-        # child widget that is stacked underneath the overlay's own widgets.
-        screen = QtWidgets.QApplication.primaryScreen()
-        if self.isVisible() and screen is not None:
-            avail = screen.availableGeometry()
-            self.screen_marker_view.setGeometry(avail)
-            self.screen_marker_view.set_window_origin(avail.topLeft())
-            self.screen_marker_view.update_board(corners, perspective_white, markers)
+        # mss reports physical screenshot pixels while Qt may use logical pixels
+        # under Windows display scaling. Map both axes and use the full virtual
+        # desktop so the independent click-through layer lines up with capture.
+        if self.isVisible() and virtual.isValid():
+            self.screen_marker_view.setGeometry(virtual)
+            self.screen_marker_view.set_window_origin(virtual.topLeft())
+            self.screen_marker_view.update_board(qt_corners, perspective_white, markers)
             if not self.screen_marker_view.isVisible():
                 self.screen_marker_view.show()
                 self.exclude_from_capture(True)

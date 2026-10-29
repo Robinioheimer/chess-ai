@@ -113,3 +113,40 @@ def test_context_manager(fake_engine_command):
     with UciEngine(fake_engine_command) as engine:
         assert engine.running
     assert not engine.running
+
+
+
+def test_broken_stdin_pipe_is_discarded_and_engine_restarts(fake_engine_command):
+    engine = UciEngine(fake_engine_command)
+    engine.start()
+    old_process = engine._process
+    old_stdin = old_process.stdin
+    old_pid = old_process.pid
+
+    class BrokenStdin:
+        closed = False
+
+        def write(self, _text):
+            raise OSError(22, "Invalid argument")
+
+        def flush(self):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    try:
+        # Simulate the Windows pipe error reported by the user.
+        old_process.stdin = BrokenStdin()
+        engine._searching = True
+        bestmove = engine.analyze(chess.STARTING_FEN, depth=2)
+        assert bestmove in [move.uci() for move in chess.Board().legal_moves]
+        assert engine.running
+        assert engine._process.pid != old_pid
+    finally:
+        try:
+            if old_stdin is not None:
+                old_stdin.close()
+        except (OSError, ValueError):
+            pass
+        engine.quit()

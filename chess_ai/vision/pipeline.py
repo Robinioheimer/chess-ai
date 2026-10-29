@@ -46,6 +46,7 @@ class RecognitionResult:
     uncertain_squares: list[str] = field(default_factory=list)
     mean_confidence: float = 0.0
     error: Optional[str] = None
+    frame_size: Optional[tuple[int, int]] = None  # captured frame (width, height)
 
 
 def infer_perspective(board_grid: Grid) -> bool:
@@ -105,6 +106,7 @@ class RecognitionPipeline:
         warp_size: int = 480,
         stable_readings: int = 2,
         min_board_fraction: float = 0.02,
+        manual_only: bool = True,
     ) -> None:
         self.recognizer = recognizer or PieceRecognizer()
         self.warp_size = warp_size
@@ -116,10 +118,11 @@ class RecognitionPipeline:
         self._candidate_grid: Optional[Grid] = None
         self._candidate_count = 0
         self._last_detection: Optional[BoardDetection] = None
+        self.last_frame_size: Optional[tuple[int, int]] = None
         self.manual_perspective: Optional[bool] = None  # None = automatic
         self.manual_corners: Optional[np.ndarray] = None  # None = automatic
         # Automatic board search stays disabled; use the manually selected or last region.
-        self.manual_only: bool = True
+        self.manual_only: bool = manual_only
         # Map (screen_row, screen_col) -> (corrected_symbol, raw_symbol_when_set)
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
         # Prevent auto-calibration from running repeatedly.
@@ -290,6 +293,7 @@ class RecognitionPipeline:
     # ------------------------------------------------------------------ run
     def process_frame(self, frame: np.ndarray) -> RecognitionResult:
         """Detect and recognize a board in one screenshot."""
+        self.last_frame_size = (int(frame.shape[1]), int(frame.shape[0]))
         detection, padded, padding = self._detect(frame)
         # Stability: avoid sudden board region jumps.
         prev_det = getattr(self, '_previous_stable_detection', None)
@@ -301,7 +305,10 @@ class RecognitionPipeline:
         if detection is not None:
             self._previous_stable_detection = detection
         if detection is None:
-            return RecognitionResult(False, error="No chessboard detected on screen.")
+            return RecognitionResult(
+                False, error="No chessboard detected on screen.",
+                frame_size=self.last_frame_size,
+            )
 
         try:
             warped = self._warp_from_detection(frame, detection, padded, padding)
@@ -310,8 +317,10 @@ class RecognitionPipeline:
             screen_grid, confidences = self._recognize_cells(cells)
         except (cv2.error, ValueError) as exc:  # pragma: no cover - defensive
             LOGGER.exception("Recognition failed")
-            return RecognitionResult(False, detection=detection,
-                                     error=f"Recognition error: {exc}")
+            return RecognitionResult(
+                False, detection=detection, error=f"Recognition error: {exc}",
+                frame_size=self.last_frame_size,
+            )
 
         perspective_white = (
             self.manual_perspective
@@ -340,6 +349,7 @@ class RecognitionPipeline:
             cell_confidences=confidences,
             uncertain_squares=uncertain,
             mean_confidence=mean_confidence,
+            frame_size=self.last_frame_size,
         )
 
     def process_stable(self, frame: np.ndarray) -> RecognitionResult:
@@ -382,6 +392,7 @@ class RecognitionPipeline:
                 cell_confidences=result.cell_confidences,
                 uncertain_squares=result.uncertain_squares,
                 mean_confidence=result.mean_confidence,
+                frame_size=result.frame_size,
             )
             return stable
         # Stable reading reached: accept the new grid.

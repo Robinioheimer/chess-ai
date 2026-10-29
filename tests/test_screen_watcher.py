@@ -13,13 +13,20 @@ from chess_ai.vision.synthetic import render_board
 
 
 def _watcher(stable_readings=1):
-    pipeline = RecognitionPipeline(stable_readings=stable_readings)
+    pipeline = RecognitionPipeline(stable_readings=stable_readings, manual_only=False)
     tracker = PositionTracker()
     events = {"recognition": [], "position": [], "error": []}
+    default_frame = render_board(board_to_grid(chess.Board()), square_px=60)
+
+    class FakeCapture:
+        def grab(self, region=None):
+            return default_frame
+
     watcher = ScreenWatcher(
         pipeline,
         tracker,
         VisionConfig(poll_interval_ms=500),
+        capture=FakeCapture(),
         on_recognition=events["recognition"].append,
         on_position=lambda update, result: events["position"].append(update),
         on_error=events["error"].append,
