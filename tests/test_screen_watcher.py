@@ -13,7 +13,7 @@ from chess_ai.vision.synthetic import render_board
 
 
 def _watcher(stable_readings=1):
-    pipeline = RecognitionPipeline(stable_readings=stable_readings)
+    pipeline = RecognitionPipeline(stable_readings=stable_readings, manual_only=False)
     tracker = PositionTracker()
     events = {"recognition": [], "position": [], "error": []}
     watcher = ScreenWatcher(
