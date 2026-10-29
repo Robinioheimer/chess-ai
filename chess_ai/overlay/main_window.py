@@ -434,11 +434,12 @@ class MainOverlay(QtWidgets.QWidget):
         self.marker_view.set_window_origin(self.geometry().topLeft())
         self.marker_view.update_board(corners, perspective_white, markers)
 
-        # If this window is visible and does not fully cover the detected board
-        # (for example, the user dragged/resized the control panel to the side),
-        # render the arrows on the full-screen click-through companion layer.
+        # Always render board arrows on the dedicated full-screen transparent
+        # click-through layer. The main window itself covers the screen, so a
+        # "board inside main window" test would otherwise route arrows to a
+        # child widget that is stacked underneath the overlay's own widgets.
         screen = QtWidgets.QApplication.primaryScreen()
-        if self.isVisible() and screen is not None and not self._board_inside_window(corners):
+        if self.isVisible() and screen is not None:
             avail = screen.availableGeometry()
             self.screen_marker_view.setGeometry(avail)
             self.screen_marker_view.set_window_origin(avail.topLeft())
