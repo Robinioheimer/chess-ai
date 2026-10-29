@@ -119,7 +119,7 @@ class RecognitionPipeline:
         self.manual_perspective: Optional[bool] = None  # None = automatic
         self.manual_corners: Optional[np.ndarray] = None  # None = automatic
         # Automatische Suche deaktiviert: nur manuelle/letzte Region nutzen.
-        self.manual_only: bool = True
+        self.manual_only: bool = False
         # Map (screen_row, screen_col) -> (corrected_symbol, raw_symbol_when_set)
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
         # Prevent auto-calibration from running repeatedly.
@@ -453,7 +453,6 @@ class RecognitionPipeline:
         """
         if self.recognizer.calibrated or self._calibration_attempted:
             return None
-        self._calibration_attempted = True
         top_white = sum(1 for r in (0, 1) for c in range(8) if grid[r][c] and grid[r][c].isupper())
         top_black = sum(1 for r in (0, 1) for c in range(8) if grid[r][c] and grid[r][c].islower())
         bot_white = sum(1 for r in (6, 7) for c in range(8) if grid[r][c] and grid[r][c].isupper())
@@ -478,6 +477,10 @@ class RecognitionPipeline:
         if self.manual_perspective is not None and self.manual_perspective != persp_white:
             return None
 
+        # Do not permanently disable calibration just because an earlier frame
+        # was a midgame, incomplete, or misclassified position. Mark it attempted
+        # only after the board really matches the opening-position constraints.
+        self._calibration_attempted = True
         expected = self._starting_screen_grid(persp_white)
         home_symbols: Grid = [[None] * 8 for _ in range(8)]
         for r in (0, 1, 6, 7):
@@ -763,18 +766,13 @@ class RecognitionPipeline:
                         grid[row][col] = chess.Piece(piece_type, color).symbol()
                         confidences[row][col] = max(confidences[row][col], 0.55)
 
-        # Interne Figur-Tracking: Speichere Koordinaten der erkannten Figuren.
-        # Das ermöglicht, dass die Pipeline die Figuren intern analysiert,
-        # ohne externe Abhängigkeiten (nur innerhalb des Pipeline-Zustands).
-        # Die Koordinaten werden als (row, col) -> (symbol, confidence) gespeichert.
+        # Keep per-frame coordinates for diagnostics only. Do not overwrite
+        # _last_grid here: it is the previous *accepted* position and is needed
+        # by _apply_move_continuity() to identify pieces across a detected move.
         self._last_cell_coords = {
             (r, c): (grid[r][c], confidences[r][c])
             for r in range(8) for c in range(8) if grid[r][c] is not None
         }
-
-        # Interne Figur-Tracking aktiv: Pipeline speichert Koordinaten intern.
-        # Keine externe Abhängigkeit nötig — alles innerhalb des Pipeline-Zustands.
-        self._last_grid = [[cell for cell in row] for row in grid]
 
         # If an early opening layout (1-4 moves haben)
         # recognizer is not yet calibrated, learn templates from the unmoved
@@ -782,11 +780,8 @@ class RecognitionPipeline:
         opening_cal = self._try_auto_calibrate_opening(grid, cells, threshold)
         if opening_cal is not None:
             grid, confidences = opening_cal
-            # Nach Kalibrierung: Stable-Detection aktualisieren, damit Pfeile bleiben.
-            self._last_grid = [[cell for cell in row] for row in grid]
-            # Behalte vorherige Detection bei, damit Board nicht verrutscht und Pfeile bleiben.
-            if hasattr(self, '_previous_stable_detection') and self._previous_stable_detection is not None:
-                pass  # Vorherige behalten
+            # Keep the accepted position untouched until process_stable() commits
+            # this frame; otherwise move continuity compares the frame with itself.
 
         # Apply legal move-transition continuity from the previous accepted state.
         self._apply_move_continuity(grid, confidences, features_grid)

@@ -225,3 +225,35 @@ def test_corner_coordinate_label_does_not_trigger_occupancy():
     cv2.putText(cell, "8", (3, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (90, 110, 70), 1)
     features = extract_cell_features(cell)
     assert not features.occupied
+
+def test_frame_recognition_does_not_overwrite_last_accepted_grid():
+    """Move continuity must compare a new frame with the prior accepted position."""
+    start_grid = board_to_grid(chess.Board())
+    start_frame = render_board(start_grid, square_px=60)
+    pipeline = RecognitionPipeline(stable_readings=2)
+    first = pipeline.process_stable(start_frame)
+    assert first.success
+    accepted_grid = [row[:] for row in pipeline._last_grid]
+
+    moved = chess.Board()
+    moved.push_san("e4")
+    moved_frame = render_board(board_to_grid(moved), square_px=60)
+    raw = pipeline.process_frame(moved_frame)
+    assert raw.success
+    # A raw frame is only a candidate; the accepted baseline stays unchanged.
+    assert pipeline._last_grid == accepted_grid
+
+    pending = pipeline.process_stable(moved_frame)
+    assert pending.success
+    assert chess.Board(pending.fen).board_fen() == chess.Board().board_fen()
+    accepted = pipeline.process_stable(moved_frame)
+    assert accepted.success
+    assert chess.Board(accepted.fen).board_fen() == moved.board_fen()
+
+def test_auto_calibration_retries_after_non_opening_position():
+    pipeline = RecognitionPipeline(stable_readings=1)
+    empty_grid = [[None] * 8 for _ in range(8)]
+    cells = np.empty((8, 8), dtype=object)
+
+    assert pipeline._try_auto_calibrate_opening(empty_grid, cells, 110.0) is None
+    assert pipeline._calibration_attempted is False

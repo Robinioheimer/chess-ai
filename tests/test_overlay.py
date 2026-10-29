@@ -310,3 +310,29 @@ def test_markers_include_percent_accuracy_and_best_move_arrow(qapp):
     assert not image.isNull()
     window.close()
 
+def test_visible_overlay_uses_full_screen_layer_for_move_arrows(qapp):
+    """Arrows must be painted above the full-screen control window, not behind it."""
+    window = MainOverlay(AppConfig())
+    scene, _ = render_scene(board_to_grid(chess.Board()), square_px=56, padding=60)
+    detection = detect_board(scene)
+    from chess_ai.vision.pipeline import RecognitionResult as RecResult
+
+    recognition = RecResult(
+        success=True,
+        fen=chess.STARTING_FEN,
+        screen_grid=board_to_grid(chess.Board()),
+        board_grid=board_to_grid(chess.Board()),
+        perspective_white=True,
+        detection=detection,
+    )
+    window.update_recognition(recognition)
+    window.update_analysis(_analysis_result())
+    window.cover_screen()
+    window.show()
+    qapp.processEvents()
+    window._refresh_markers()
+    qapp.processEvents()
+
+    assert window.screen_marker_view.isVisible()
+    assert len(window.screen_marker_view._markers) >= 1
+    window.close()
