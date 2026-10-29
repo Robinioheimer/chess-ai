@@ -407,10 +407,14 @@ class UciEngine:
                 self._send("quit")
                 process.wait(timeout=5)
             except (UciEngineError, subprocess.TimeoutExpired, OSError):
-                process.kill()
+                try:
+                    if process.poll() is None:
+                        process.kill()
+                except OSError:
+                    pass
                 try:
                     process.wait(timeout=5)
-                except subprocess.TimeoutExpired:  # pragma: no cover
+                except (subprocess.TimeoutExpired, OSError):  # pragma: no cover
                     pass
             finally:
                 # Explicitly close pipes and reap the reader thread so no
@@ -419,7 +423,7 @@ class UciEngine:
                     try:
                         if stream is not None:
                             stream.close()
-                    except OSError:
+                    except (OSError, ValueError):
                         pass
                 self._process = None
                 self._reader = None
