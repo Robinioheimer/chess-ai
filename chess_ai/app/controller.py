@@ -57,6 +57,9 @@ class AppController:
             chess.BLACK if config.vision.side_to_move_default == "b" else chess.WHITE
         )
         self.tracker = PositionTracker(side_to_move=initial_side)
+        # This user always starts from the standard initial chess position.
+        # Seed the tracker so startup analysis does not depend on a manual click.
+        self.tracker.set_manual_fen(chess.STARTING_FEN)
         self.recognizer = PieceRecognizer()
         self._load_templates()
         self.pipeline = RecognitionPipeline(
@@ -95,6 +98,8 @@ class AppController:
         self.watcher.start()
         if self.analyzer is not None:
             self.analyzer.start()
+            if self.tracker.fen:
+                self.analyzer.request_analysis(self.tracker.fen)
         self.hotkeys.start()
         self.window.cover_screen()
         self.window.exclude_from_capture(True)
