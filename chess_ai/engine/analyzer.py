@@ -83,7 +83,7 @@ class AnalysisManager:
         self.engine.set_option("Threads", max(1, self.config.threads))
         self.engine.set_option("Hash", max(1, self.config.hash_mb))
         if "MultiPV" in self.engine.supported_options:
-            self.engine.set_option("MultiPV", max(1, self.config.multipv))
+            self.engine.set_option("MultiPV", max(5, self.config.multipv))
 
     # -------------------------------------------------------------- control
     def request_analysis(self, fen: str) -> None:
@@ -200,7 +200,7 @@ class AnalysisManager:
     def _effective_multipv(self, board: chess.Board) -> int:
         if self.config.analyze_all_legal:
             return max(1, min(500, legal_move_count(board)))
-        return max(1, min(500, self.config.multipv, legal_move_count(board) or 1))
+        return max(1, min(500, max(5, self.config.multipv), legal_move_count(board) or 1))
 
     # ------------------------------------------------------------- building
     def _emit(
