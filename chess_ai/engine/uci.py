@@ -223,8 +223,13 @@ class UciEngine:
         if self._process is None or self._process.stdin is None:
             raise UciEngineError("Engine is not running.")
         LOGGER.debug("uci> %s", command)
-        self._process.stdin.write(command + "\n")
-        self._process.stdin.flush()
+        try:
+            self._process.stdin.write(command + "\n")
+            self._process.stdin.flush()
+        except (BrokenPipeError, OSError, ValueError) as exc:
+            raise UciEngineError(
+                f"Could not send UCI command {command.split()[0]!r}: {exc}"
+            ) from exc
 
     def set_option(self, name: str, value: object) -> None:
         with self._lock:
@@ -281,10 +286,14 @@ class UciEngine:
             import time
             deadline = time.monotonic() + timeout
             bestmove: Optional[str] = None
+            stop_sent = False
             try:
                 while time.monotonic() < deadline:
-                    if stop_event is not None and stop_event.is_set():
+                    # UCI stop is a one-shot request. Sending it on every poll
+                    # can flood engines while they are finishing the search.
+                    if stop_event is not None and stop_event.is_set() and not stop_sent:
                         self._send("stop")
+                        stop_sent = True
                     try:
                         line = self._lines.get(timeout=0.05)
                     except queue.Empty:
