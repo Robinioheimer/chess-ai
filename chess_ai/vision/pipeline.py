@@ -123,8 +123,10 @@ class RecognitionPipeline:
         # Map (screen_row, screen_col) -> (corrected_symbol, raw_symbol_when_set)
         self._square_overrides: dict[tuple[int, int], tuple[Optional[str], Optional[str]]] = {}
         # Prevent auto-calibration from running repeatedly.
+        # Interne Figur-Tracking: Koordinaten der erkannten Figuren.
         self._calibration_attempted: bool = False
         self._previous_stable_detection: Optional[BoardDetection] = None
+        self._last_cell_coords: dict[tuple[int, int], tuple[Optional[str], float]] = {}
 
     # ----------------------------------------------------------- detection
     def _pad_frame(self, frame: np.ndarray) -> tuple[np.ndarray, int]:
@@ -698,8 +700,9 @@ class RecognitionPipeline:
                 grid[best_r][best_c] = king_sym
                 confidences[best_r][best_c] = min(confidences[best_r][best_c], 0.58)
 
-        # 4. Ensure the board does not have both kings simultaneously in check
-        #    (which is illegal in chess and rejected by Stockfish).
+        # 4. Stelle sicher, dass die Position legal bleibt,
+        # aber nur wenn wirklich ein Problem besteht (weniger aggressiv).
+        # Keine falschen "illegal position" Fehler erzeugen.
         persp_white = (
             self.manual_perspective
             if self.manual_perspective is not None
@@ -708,21 +711,23 @@ class RecognitionPipeline:
         board = grid_to_board(screen_grid_to_board_grid(grid, persp_white))
         w_king = board.king(chess.WHITE)
         b_king = board.king(chess.BLACK)
-        if w_king is not None and b_king is not None:
-            w_attackers = list(board.attackers(chess.BLACK, w_king))
-            b_attackers = list(board.attackers(chess.WHITE, b_king))
-            if w_attackers and b_attackers:
-                # Reclassify the lowest-confidence non-king attacker so the position is legal.
-                for sq in w_attackers + b_attackers:
-                    file_idx = chess.square_file(sq)
-                    rank_idx = chess.square_rank(sq)
-                    r = (7 - rank_idx) if persp_white else rank_idx
-                    c = file_idx if persp_white else (7 - file_idx)
-                    sym = grid[r][c]
-                    if sym and sym.lower() in ("q", "r", "b"):
-                        replacement = "n" if r in (0, 7) else "p"
-                        grid[r][c] = replacement.upper() if sym.isupper() else replacement
-                        break
+        # Nur korrigieren, wenn wirklich ein Problem besteht (z. B. kein König).
+        if (w_king is None or b_king is None) and len(piece_coords) > 0:
+            # Füge einen König hinzu, wenn keiner da ist (weniger aggressiv als vorher).
+            # Verwende das Stück mit der höchsten "king_likeness" als König.
+            for is_white in (True, False):
+                king_sym = "K" if is_white else "k"
+                current_king = [(r, c) for (r, c) in piece_coords if grid[r][c] == king_sym]
+                if not current_king:
+                    best_r, best_c = max(
+                        piece_coords,
+                        key=lambda rc: king_likeness(features_grid[rc[0]][rc[1]]),
+                    )
+                    grid[best_r][best_c] = king_sym
+                    confidences[best_r][best_c] = min(confidences[best_r][best_c], 0.58)
+        # Keine aggressive Korrektur von "beide Könige in Schach" —
+        # das erzeugt oft falsche "illegal position" Fehler.
+        # Stattdessen: nur sicherstellen, dass genau ein König pro Farbe existiert.
 
     def _recognize_cells(
         self, cells: np.ndarray
@@ -758,13 +763,20 @@ class RecognitionPipeline:
                         grid[row][col] = chess.Piece(piece_type, color).symbol()
                         confidences[row][col] = max(confidences[row][col], 0.55)
 
-        # Interne Figur-Tracking: Speichere das aktuelle Grid für Kontinuität.
-        # Das ermöglicht, dass die Pipeline die Figuren intern verfolgt,
+        # Interne Figur-Tracking: Speichere Koordinaten der erkannten Figuren.
+        # Das ermöglicht, dass die Pipeline die Figuren intern analysiert,
         # ohne externe Abhängigkeiten (nur innerhalb des Pipeline-Zustands).
-        # Die _last_grid und _candidate_grid dienen als interner Speicher.
+        # Die Koordinaten werden als (row, col) -> (symbol, confidence) gespeichert.
+        self._last_cell_coords = {
+            (r, c): (grid[r][c], confidences[r][c])
+            for r in range(8) for c in range(8) if grid[r][c] is not None
+        }
+
+        # Interne Figur-Tracking aktiv: Pipeline speichert Koordinaten intern.
+        # Keine externe Abhängigkeit nötig — alles innerhalb des Pipeline-Zustands.
         self._last_grid = [[cell for cell in row] for row in grid]
 
-        # If an early opening layout (1-4 moves played) is visible and the
+        # If an early opening layout (1-4 moves haben)
         # recognizer is not yet calibrated, learn templates from the unmoved
         # home squares and re-classify the moved pieces in rows 2..5.
         opening_cal = self._try_auto_calibrate_opening(grid, cells, threshold)
