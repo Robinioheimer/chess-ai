@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 import chess
+from PyQt5 import QtWidgets
 
 from ..config import AppConfig, config_dir
 from ..core.fen_utils import (
