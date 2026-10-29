@@ -486,7 +486,7 @@ class BoardRegionSelector(QtWidgets.QDialog):
             "(Esc = cancel)."
         )
         blayout.addWidget(label)
-        auto_btn = QtWidgets.QPushButton("Reset to Auto-Detect")
+        auto_btn = QtWidgets.QPushButton("Clear board selection")
         auto_btn.clicked.connect(self._choose_auto)
         blayout.addWidget(auto_btn)
         cancel_btn = QtWidgets.QPushButton("Cancel")
