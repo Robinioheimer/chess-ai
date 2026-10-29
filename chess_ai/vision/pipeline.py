@@ -800,10 +800,14 @@ class RecognitionPipeline:
         self._enforce_chess_constraints(grid, confidences, features_grid)
         self._last_raw_grid = [[cell for cell in row] for row in grid]
 
-        # Apply any active user square corrections whose underlying square has not changed.
+        # Apply user corrections until the square's occupancy or piece colour
+        # changes. Exact piece-type matches are too fragile: the classifier can
+        # alternate between e.g. a pawn and a knight on consecutive frames,
+        # which used to erase the correction and make arrows flicker.
         if self._square_overrides:
             for (row, col), (corrected_sym, raw_sym) in list(self._square_overrides.items()):
-                if grid[row][col] == raw_sym:
+                current_sym = grid[row][col]
+                if self._same_square_state(current_sym, raw_sym):
                     grid[row][col] = corrected_sym
                     confidences[row][col] = 0.99
                 else:
@@ -811,6 +815,13 @@ class RecognitionPipeline:
             self._enforce_chess_constraints(grid, confidences, features_grid)
 
         return grid, confidences
+
+    @staticmethod
+    def _same_square_state(current_sym: Optional[str], raw_sym: Optional[str]) -> bool:
+        """Whether a square's occupancy and colour still match its correction baseline."""
+        if current_sym is None or raw_sym is None:
+            return current_sym is None and raw_sym is None
+        return current_sym.isupper() == raw_sym.isupper()
 
     def _candidate_signature(self) -> Optional[tuple]:
         if self._candidate_grid is None:

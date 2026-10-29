@@ -263,3 +263,15 @@ def test_auto_calibration_retries_after_non_opening_position():
 def test_manual_only_detection_remains_enabled_by_default():
     pipeline = RecognitionPipeline()
     assert pipeline.manual_only is True
+
+
+
+def test_manual_correction_state_ignores_piece_type_classifier_flicker():
+    """A changed piece guess of the same colour must not erase a correction."""
+    same_state = RecognitionPipeline._same_square_state
+    assert same_state("P", "N")
+    assert same_state("p", "r")
+    assert same_state(None, None)
+    assert not same_state("p", "P")
+    assert not same_state(None, "P")
+    assert not same_state("N", None)
