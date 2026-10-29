@@ -573,6 +573,14 @@ class RecognitionPipeline:
             return
 
         if len(diffs) > 4:
+            # A real single move can change at most four squares (castling).
+            # Larger changes are overwhelmingly caused by a bad frame/crop or
+            # unstable piece masks. Keep the last accepted position instead of
+            # publishing a board full of fresh guesses.
+            for r in range(8):
+                for c in range(8):
+                    grid[r][c] = self._last_grid[r][c]
+                    confidences[r][c] = max(confidences[r][c], 0.80)
             return
 
         persp_white = (
