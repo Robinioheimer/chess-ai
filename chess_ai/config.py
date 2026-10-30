@@ -34,7 +34,7 @@ class EngineConfig:
     stockfish_path: str = ""          # empty -> auto-detect
     threads: int = 2
     hash_mb: int = 256
-    depth: int = 22                   # target search depth
+    depth: int = 16                   # target search depth; faster live updates
     movetime_ms: int = 0              # 0 -> search by depth, otherwise time cap
     multipv: int = 5                  # number of candidate lines (max 500)
     analyze_all_legal: bool = False   # override multipv with number of legal moves

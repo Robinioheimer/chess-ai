@@ -435,7 +435,7 @@ class MainOverlay(QtWidgets.QWidget):
                 colors = self.config.overlay.candidate_colors or ["#E8862C"]
                 # MultiPV is already ranked by the engine. Keep the overlay
                 # focused on a few strong candidates instead of every legal move.
-                max_candidates = min(3, max(1, self.config.engine.multipv))
+                max_candidates = min(5, max(5, self.config.engine.multipv))
                 shown = 0
                 for move in self._analysis.moves:
                     if shown >= max_candidates:

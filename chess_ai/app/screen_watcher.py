@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 from typing import Callable, Optional
 
+import chess
 import numpy as np
 
 from ..config import VisionConfig
@@ -116,6 +117,23 @@ class ScreenWatcher:
         else:
             frame = self.capture.grab()
         result = self.pipeline.process_stable(frame)
+        # Never replace a known position with an impossible vision result.
+        if result.success and result.fen:
+            try:
+                vision_status = chess.Board(result.fen).status()
+            except (ValueError, TypeError):
+                vision_status = chess.STATUS_INVALID
+            if vision_status != chess.STATUS_VALID:
+                if self.tracker.has_position and result.detection is not None:
+                    LOGGER.warning(
+                        "Ignoring impossible vision position; keeping last valid position: %s",
+                        result.fen,
+                    )
+                    result.fen = self.tracker.fen
+                    result.error = None
+                else:
+                    result.success = False
+                    result.error = f"Rejected impossible vision position (status={vision_status})."
         self.on_recognition(result)
         if not result.success or result.fen is None:
             self.on_error(result.error or "Board recognition failed.")
