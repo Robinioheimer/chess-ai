@@ -207,13 +207,10 @@ class CandidatePanel(QtWidgets.QWidget):
             self._engine_base_text = text
 
     def set_searching(self, searching: bool) -> None:
-        if searching:
-            base = getattr(self, "_engine_base_text", "Engine")
-            self.engine_dot.setStyleSheet(
-                f"color: {self._ENGINE_DOT_COLORS['analyzing']};"
-            )
-            self.engine_label.setText(f"{base} — analyzing…")
-        elif getattr(self, "_engine_base_text", None):
+        # The dot reports whether the engine process is connected, not whether
+        # a search is currently running. Search activity is shown separately
+        # by the progress bar and status label below.
+        if getattr(self, "_engine_base_text", None):
             self.engine_dot.setStyleSheet(
                 f"color: {self._ENGINE_DOT_COLORS['connected']};"
             )
