@@ -17,6 +17,7 @@ PIECES = {
 
 class AnalysisBridge(QtCore.QObject):
     result = QtCore.pyqtSignal(object)
+    status = QtCore.pyqtSignal(str)
 
 
 class ChessBoardWidget(QtWidgets.QWidget):
@@ -208,8 +209,11 @@ class TrainingBoardOverlay(QtWidgets.QWidget):
         self.setMinimumSize(620, 650)
         self._engine = None
         self._analyzer = None
+        self._engine_path = engine_path
+        self._engine_config = engine_config
         self._bridge = AnalysisBridge(self)
         self._bridge.result.connect(self._show_analysis)
+        self._bridge.status.connect(self.analysis_state.setText)
         self._last_analysis_fen = None
         self._build_ui()
         if engine_path and engine_config:
@@ -263,7 +267,9 @@ class TrainingBoardOverlay(QtWidgets.QWidget):
         self.size_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.size_slider.setRange(620, 1120)
         self.size_slider.setValue(820)
-        self.size_slider.valueChanged.connect(self.resize)
+        self.size_slider.valueChanged.connect(
+            lambda value: self.resize(value, max(650, int(value * 0.92)))
+        )
         size_row.addWidget(self.size_slider, 1)
         board_layout.addLayout(size_row)
         root.addWidget(board_card, 3)
@@ -312,10 +318,7 @@ class TrainingBoardOverlay(QtWidgets.QWidget):
             self.analysis_state.setText(f"Stockfish-Fehler: {exc}")
 
     def _set_analysis_status(self, message):
-        QtCore.QMetaObject.invokeMethod(
-            self.analysis_state, "setText", QtCore.Qt.QueuedConnection,
-            QtCore.Q_ARG(str, message)
-        )
+        self._bridge.status.emit(message)
 
     def _position_changed(self, fen):
         self.turn_label.setText("Weiß am Zug" if self.board_view.board.turn else "Schwarz am Zug")
