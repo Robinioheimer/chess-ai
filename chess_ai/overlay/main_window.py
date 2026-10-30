@@ -164,6 +164,7 @@ class MainOverlay(QtWidgets.QWidget):
     turn_toggle_requested = QtCore.pyqtSignal()
     perspective_toggle_requested = QtCore.pyqtSignal()
     settings_requested = QtCore.pyqtSignal()
+    training_board_requested = QtCore.pyqtSignal()
     move_visibility_changed = QtCore.pyqtSignal(str, bool)
     move_focused = QtCore.pyqtSignal(str)
 
@@ -276,6 +277,10 @@ class MainOverlay(QtWidgets.QWidget):
         self.perspective_button.setToolTip("Flip board orientation (White / Black at bottom)")
         self.perspective_button.clicked.connect(self.perspective_toggle_requested.emit)
         toolbar.addWidget(self.perspective_button)
+
+        training_button = QtWidgets.QPushButton("♟ Training board")
+        training_button.clicked.connect(self.training_board_requested.emit)
+        toolbar.addWidget(training_button)
 
         settings_button = QtWidgets.QPushButton("⚙ Settings")
         settings_button.clicked.connect(self.settings_requested.emit)
