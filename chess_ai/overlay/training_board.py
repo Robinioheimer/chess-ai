@@ -214,9 +214,10 @@ class TrainingBoardOverlay(QtWidgets.QWidget):
         self._engine_config = engine_config
         self._bridge = AnalysisBridge(self)
         self._bridge.result.connect(self._show_analysis)
-        self._bridge.status.connect(self.analysis_state.setText)
         self._last_analysis_fen = None
         self._build_ui()
+        # Build widgets before connecting signals to their methods.
+        self._bridge.status.connect(self.analysis_state.setText)
         if engine_path and engine_config:
             self._start_analysis(engine_path, engine_config)
         else:
