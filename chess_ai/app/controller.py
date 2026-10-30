@@ -109,6 +109,9 @@ class AppController:
         try:
             self.hotkeys.stop()
             self.watcher.stop()
+            if self.training_board is not None:
+                self.training_board.close()
+                self.training_board = None
             if self.analyzer is not None:
                 self.analyzer.shutdown()
         finally:
@@ -421,8 +424,14 @@ class AppController:
         )
 
     def _open_training_board(self) -> None:
-        if self.training_board is None:
-            self.training_board = TrainingBoardOverlay()
+        if self.training_board is None or self.training_board._analyzer is None:
+            if self.training_board is not None:
+                self.training_board.deleteLater()
+            engine_path = self.engine_info.path if self.engine_info is not None else None
+            self.training_board = TrainingBoardOverlay(
+                engine_path=engine_path,
+                engine_config=self.config.engine if engine_path else None,
+            )
         self.training_board.show()
         self.training_board.raise_()
         self.training_board.activateWindow()
