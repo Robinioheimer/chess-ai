@@ -98,6 +98,10 @@ class TrainingBoardOverlay(QtWidgets.QWidget):
         bar=QtWidgets.QHBoxLayout()
         for name,fn in (("Reset",self.reset_board),("Kings only",self.kings_only),("Rotate",self.rotate)):
             b=QtWidgets.QPushButton(name); b.clicked.connect(fn); bar.addWidget(b)
+        for name, color in (("Turn white", chess.WHITE), ("Turn black", chess.BLACK)):
+            turn_button=QtWidgets.QPushButton(name)
+            turn_button.clicked.connect(lambda checked=False, side=color: self.set_turn(side))
+            bar.addWidget(turn_button)
         self.forward_box=QtWidgets.QCheckBox("Forward drag"); self.forward_box.setChecked(True)
         self.forward_box.setStyleSheet("color:white"); self.forward_box.toggled.connect(self.set_forward); bar.addWidget(self.forward_box)
         root.addLayout(bar)
@@ -106,6 +110,7 @@ class TrainingBoardOverlay(QtWidgets.QWidget):
         self.opacity.valueChanged.connect(lambda v:self.setWindowOpacity(v/100)); opacity.addWidget(self.opacity,1); root.addLayout(opacity)
         self.setStyleSheet("QWidget{background:rgba(20,25,34,225);color:white} QPushButton{background:#29364b;color:white;border:1px solid #52627a;border-radius:5px;padding:5px}")
     def set_forward(self,v): self.canvas.forward=bool(v)
+    def set_turn(self,side): self.board.turn=side; self.canvas.update()
     def reset_board(self): self.board.reset(); self.canvas.update()
     def kings_only(self):
         self.board.clear(); self.board.set_piece_at(chess.E1,chess.Piece(chess.KING,chess.WHITE))
