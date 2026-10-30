@@ -214,7 +214,9 @@ class AnalysisManager:
         multipv: int,
         searching: bool,
     ) -> None:
-        ordered = [latest[idx] for idx in sorted(latest)]
+        # Some UCI engines (and test doubles) may emit more MultiPV lines
+        # than requested. Never expose more candidates than this search asked for.
+        ordered = [latest[idx] for idx in sorted(latest)[:multipv]]
         moves: list[MoveEvaluation] = []
         for position, info in enumerate(ordered):
             uci_move = info.pv[0]
