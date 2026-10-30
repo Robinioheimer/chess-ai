@@ -424,7 +424,9 @@ class AppController:
         )
 
     def _open_training_board(self) -> None:
-        if self.training_board is None:
+        if self.training_board is None or self.training_board._analyzer is None:
+            if self.training_board is not None:
+                self.training_board.deleteLater()
             engine_path = self.engine_info.path if self.engine_info is not None else None
             self.training_board = TrainingBoardOverlay(
                 engine_path=engine_path,
