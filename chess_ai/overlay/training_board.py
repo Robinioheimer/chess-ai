@@ -186,16 +186,17 @@ class ChessBoardWidget(QtWidgets.QWidget):
     @staticmethod
     def _draw_piece(painter, rect, piece, cell):
         symbol = PIECES[piece.symbol()]
-        font = QtGui.QFont("DejaVu Sans", max(22, int(cell*.76)))
+        font = QtGui.QFont("Segoe UI Symbol", max(22, int(cell*.76)))
         font.setStyleStrategy(QtGui.QFont.PreferAntialias)
         painter.setFont(font)
-        # White pieces have a dark outline; black pieces are filled dark.
-        if piece.color:
-            painter.setPen(QtGui.QPen(QtGui.QColor("#202020"), max(1.2, cell*.018)))
-            painter.drawText(rect, QtCore.Qt.AlignCenter, symbol)
-        else:
-            painter.setPen(QtGui.QPen(QtGui.QColor("#F5F5F5"), max(1.0, cell*.014)))
-            painter.drawText(rect, QtCore.Qt.AlignCenter, symbol)
+        # Draw a contrasting offset first so both piece colors stay readable
+        # on both square colors, then draw the actual piece glyph.
+        shadow = QtGui.QColor("#171717" if piece.color else "#F5F5F5")
+        foreground = QtGui.QColor("#FAFAFA" if piece.color else "#151515")
+        painter.setPen(shadow)
+        painter.drawText(rect.translated(1.2, 1.2), QtCore.Qt.AlignCenter, symbol)
+        painter.setPen(foreground)
+        painter.drawText(rect, QtCore.Qt.AlignCenter, symbol)
 
 
 class TrainingBoardOverlay(QtWidgets.QWidget):
