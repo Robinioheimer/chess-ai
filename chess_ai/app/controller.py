@@ -36,6 +36,7 @@ from ..overlay.dialogs import (
     SettingsDialog,
 )
 from ..overlay.main_window import MainOverlay
+from ..overlay.training_board import TrainingBoardOverlay
 from ..overlay.qt_bridge import SignalBridge
 from ..vision.capture import ScreenCapture
 from ..vision.pipeline import RecognitionPipeline, RecognitionResult
@@ -67,6 +68,7 @@ class AppController:
         )
         self._apply_perspective_setting()
         self.window = MainOverlay(config)
+        self.training_board = None
         self.window.set_side_to_move(initial_side == chess.WHITE)
         self.capture = capture or ScreenCapture()
         self.watcher = ScreenWatcher(
@@ -187,6 +189,7 @@ class AppController:
         window.turn_toggle_requested.connect(self._toggle_turn)
         window.perspective_toggle_requested.connect(self._toggle_perspective)
         window.settings_requested.connect(self._open_settings)
+        window.training_board_requested.connect(self._open_training_board)
 
     def _connect_bridge(self) -> None:
         self.bridge.recognition_ready.connect(self.window.update_recognition)
@@ -416,6 +419,13 @@ class AppController:
         self.bridge.status_message.emit(
             f"Calibrated {count} piece templates from the visible board."
         )
+
+    def _open_training_board(self) -> None:
+        if self.training_board is None:
+            self.training_board = TrainingBoardOverlay()
+        self.training_board.show()
+        self.training_board.raise_()
+        self.training_board.activateWindow()
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self.config, self.window)
